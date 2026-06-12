@@ -1,8 +1,8 @@
 `timescale 1ns/1ps
-// wt_rom_tb.v — 128点单通道 WT 合成器 testbench
-// 对齐 STC32G wt.c: phase[15:5]&0x7F, step=freq*8192/32051
+// wt_rom_tb.v — 128点 4通道 WT 合成器 testbench
+// 对齐 STC32G wt.c: phase[11:5]&0x7F, step=freq*8192/32051
+// 6波形(sqr/sq12/sq25/sine/saw/noise), 16level, 32vol
 // 架构: 查表累加器, 39SF040(ROM) + 62256(RAM) + 2×74283(ALU)
-// level 16级, vol 16级 (AY-3-8910 style)
 module wt_rom_tb;
 
 reg clk;
@@ -10,6 +10,7 @@ reg clk;
 localparam SAMPLE_RATE = 32051;
 localparam CLK_HZ      = 10_000_000;
 localparam SAMPLE_DIV  = CLK_HZ / SAMPLE_RATE;
+localparam CHANS       = 4;
 
 reg [15:0] sample_cnt;
 wire sample_clk = (sample_cnt == 0);
@@ -19,60 +20,73 @@ always @(posedge clk) begin
 end
 
 // ---- 39SF040 ROM (512K x 8) ----
-// 地址: wave_idx[2]<<14 | level[4]<<10 | vol[4]<<7 | idx[7]
 reg [7:0] rom_data [0:524287];
 initial begin
     $readmemh("rom/wt_39sf040.hex", rom_data);
 end
 
-// ---- 通道状态 ----
-reg [15:0] phase;
-reg [15:0] step_val;
-reg [3:0]  level;       // 0-15
-reg [2:0]  env_state;   // 0=off 1=atk 2=sus 3=rel
-reg [7:0]  env_cnt;
-reg [3:0]  vol;         // 0-15
-reg [1:0]  wave_idx;    // 0=sqr 1=sine 2=saw 3=noise
-reg [7:0]  env_rate;
-reg signed [7:0] dac_out;
+// ---- 4 通道状态 ----
+reg [15:0] phase   [0:3];
+reg [15:0] step_val[0:3];
+reg [3:0]  level   [0:3];
+reg [2:0]  env_state[0:3];
+reg [7:0]  env_cnt [0:3];
+reg [4:0]  vol     [0:3];  // 0-31
+reg [2:0]  wave_idx[0:3];  // 0-5
+reg [7:0]  env_rate[0:3];
+
+reg signed [15:0] dac_out;
 reg running;
 
-// ---- step: freq * 8192 / 32051 (STC32G 公式) ----
-localparam [15:0] STEP_C4 = 16'd67;
-localparam [15:0] STEP_A4 = 16'd112;
+// ---- step: freq * 8192 / 32051 ----
+localparam [15:0] STEP_C4  = 16'd67;
+localparam [15:0] STEP_E4  = 16'd84;
+localparam [15:0] STEP_G4  = 16'd100;
+localparam [15:0] STEP_C5  = 16'd134;
 
-// ---- ROM 地址 (组合逻辑, 每拍更新) ----
+integer fd, i, ch;
 reg [18:0] rom_addr;
-
-integer fd, i;
+reg signed [15:0] ch_out [0:3];
 
 always @(posedge clk) begin
     if (sample_clk && running) begin
-        phase = phase + step_val;
-        rom_addr = {wave_idx, level, vol, phase[11:5]};
-        dac_out = $signed(rom_data[rom_addr]);
-
-        if (env_state != 0) begin
-            if (env_cnt >= env_rate) begin
-                env_cnt <= 0;
-                case (env_state)
-                1: begin
-                    if (level < 15) level <= level + 1;
-                    else env_state <= 2;
-                end
-                2: ; // sustain
-                3: begin
-                    if (level > 0) level <= level - 1;
-                    else begin
-                        level <= 0;
-                        env_state <= 0;
+        dac_out = 0;
+        for (ch = 0; ch < CHANS; ch = ch + 1) begin
+            if (env_state[ch] != 0) begin
+                // phase 累加
+                phase[ch] = phase[ch] + step_val[ch];
+                // ROM 查表
+                rom_addr = {wave_idx[ch], level[ch], vol[ch], phase[ch][11:5]};
+                ch_out[ch] = $signed(rom_data[rom_addr]);
+                // 混音
+                dac_out = dac_out + ch_out[ch];
+                // 包络
+                if (env_cnt[ch] >= env_rate[ch]) begin
+                    env_cnt[ch] = 0;
+                    case (env_state[ch])
+                    1: begin
+                        if (level[ch] < 15) level[ch] = level[ch] + 1;
+                        else env_state[ch] = 2;
                     end
+                    2: ; // sustain
+                    3: begin
+                        if (level[ch] > 0) level[ch] = level[ch] - 1;
+                        else begin
+                            level[ch] = 0;
+                            env_state[ch] = 0;
+                        end
+                    end
+                    endcase
+                end else begin
+                    env_cnt[ch] = env_cnt[ch] + 1;
                 end
-                endcase
             end else begin
-                env_cnt <= env_cnt + 1;
+                ch_out[ch] = 0;
             end
         end
+        // 裁剪
+        if (dac_out > 127) dac_out = 127;
+        if (dac_out < -128) dac_out = -128;
     end
 end
 
@@ -81,17 +95,29 @@ initial begin
     fd = $fopen("wt_output.csv", "w");
     $fdisplay(fd, "sample,dac_signed");
 
-    phase = 0; step_val = 0; level = 0; env_state = 0;
-    env_cnt = 0; vol = 0; wave_idx = 0; env_rate = 0;
+    for (ch = 0; ch < CHANS; ch = ch + 1) begin
+        phase[ch] = 0; step_val[ch] = 0; level[ch] = 0;
+        env_state[ch] = 0; env_cnt[ch] = 0; vol[ch] = 0;
+        wave_idx[ch] = 0; env_rate[ch] = 0; ch_out[ch] = 0;
+    end
     dac_out = 0; running = 0;
     sample_cnt = SAMPLE_DIV - 1;
 
     #200;
 
-    // Test 1: sine C4 attack+sustain
-    phase = 0; step_val = STEP_C4;
-    level = 0; env_state = 1; env_cnt = 0;
-    vol = 15; wave_idx = 2'd1; env_rate = 64;
+    // ---- Test 1: C major chord (C4+E4+G4) sine ----
+    // ch0: C4 sine
+    phase[0] = 0; step_val[0] = STEP_C4;
+    level[0] = 0; env_state[0] = 1; env_cnt[0] = 0;
+    vol[0] = 31; wave_idx[0] = 3; env_rate[0] = 64;
+    // ch1: E4 sine
+    phase[1] = 0; step_val[1] = STEP_E4;
+    level[1] = 0; env_state[1] = 1; env_cnt[1] = 0;
+    vol[1] = 31; wave_idx[1] = 3; env_rate[1] = 64;
+    // ch2: G4 sine
+    phase[2] = 0; step_val[2] = STEP_G4;
+    level[2] = 0; env_state[2] = 1; env_cnt[2] = 0;
+    vol[2] = 31; wave_idx[2] = 3; env_rate[2] = 64;
     running = 1;
 
     for (i = 0; i < 16000; i = i + 1) begin
@@ -99,42 +125,39 @@ initial begin
         $fdisplay(fd, "%0d,%0d", i, $signed(dac_out));
     end
 
-    // Test 2: release
-    env_state = 3;
+    // ---- Test 2: release all ----
+    for (ch = 0; ch < CHANS; ch = ch + 1)
+        if (env_state[ch] != 0) env_state[ch] = 3;
+
     for (i = 0; i < 4000; i = i + 1) begin
         repeat (312) clk = #50 ~clk;
         $fdisplay(fd, "%0d,%0d", i + 16000, $signed(dac_out));
     end
 
-    // Test 3: sqr A4
-    phase = 0; step_val = STEP_A4;
-    level = 0; env_state = 1; env_cnt = 0;
-    wave_idx = 2'd0; env_rate = 64;
-    for (i = 0; i < 8000; i = i + 1) begin
+    // ---- Test 3: multi-waveform (sqr C4 + saw E4 + noise G4 + sine C5) ----
+    phase[0] = 0; step_val[0] = STEP_C4;
+    level[0] = 0; env_state[0] = 1; env_cnt[0] = 0;
+    vol[0] = 31; wave_idx[0] = 0; env_rate[0] = 64; // sqr
+
+    phase[1] = 0; step_val[1] = STEP_E4;
+    level[1] = 0; env_state[1] = 1; env_cnt[1] = 0;
+    vol[1] = 31; wave_idx[1] = 4; env_rate[1] = 64; // saw
+
+    phase[2] = 0; step_val[2] = STEP_G4;
+    level[2] = 0; env_state[2] = 1; env_cnt[2] = 0;
+    vol[2] = 31; wave_idx[2] = 5; env_rate[2] = 64; // noise
+
+    phase[3] = 0; step_val[3] = STEP_C5;
+    level[3] = 0; env_state[3] = 1; env_cnt[3] = 0;
+    vol[3] = 31; wave_idx[3] = 3; env_rate[3] = 64; // sine
+
+    for (i = 0; i < 16000; i = i + 1) begin
         repeat (312) clk = #50 ~clk;
         $fdisplay(fd, "%0d,%0d", i + 20000, $signed(dac_out));
     end
 
-    // Test 4: saw C4
-    phase = 0; step_val = STEP_C4;
-    level = 0; env_state = 1; env_cnt = 0;
-    wave_idx = 2'd2; env_rate = 64;
-    for (i = 0; i < 8000; i = i + 1) begin
-        repeat (312) clk = #50 ~clk;
-        $fdisplay(fd, "%0d,%0d", i + 28000, $signed(dac_out));
-    end
-
-    // Test 5: noise C4
-    phase = 0; step_val = STEP_C4;
-    level = 0; env_state = 1; env_cnt = 0;
-    wave_idx = 2'd3; env_rate = 64;
-    for (i = 0; i < 8000; i = i + 1) begin
-        repeat (312) clk = #50 ~clk;
-        $fdisplay(fd, "%0d,%0d", i + 36000, $signed(dac_out));
-    end
-
     $fclose(fd);
-    $display("Done. 44000 samples.");
+    $display("Done. 36000 samples.");
     $finish;
 end
 
