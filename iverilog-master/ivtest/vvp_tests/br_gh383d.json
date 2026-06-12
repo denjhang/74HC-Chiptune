@@ -1,0 +1,15 @@
+{
+    "type"   : "normal",
+    "source" : "br_gh383d.v",
+    "iverilog-args" : [ "-g2012" ],
+    "gold"   : "br_gh383d",
+    "strict" : {
+        "gold"   : "br_gh383d_std"
+    },
+    "vlog95" : {
+        "__comment"     : "Real/dynamic arrays are not supported",
+        "type"          : "CE",
+        "iverilog-args" : [ "-pallowsigned=1" ],
+        "gold"          : ""
+    }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "ice-chips-verilog",
+  "version": "0.9.2",
+  "description": "Library of all common discrete logic devices in Verilog",
+  "keywords": [
+    "verilog",
+    "discrete"
+  ],
+  "repository": {
+    "type": "git",
+    "branch": "main",
+    "url": "https://github.com/TimRudy/ice-chips-verilog.git"
+  },
+  "author": {
+    "name": "Tim Rudy",
+    "url": "https://github.com/TimRudy"
+  },
+  "license": "GPL-3.0-or-later",
+  "bugs": "https://github.com/TimRudy/ice-chips-verilog/issues",
+  "dependencies": {
+    "walk-sync": "^4.0.2"
+  }
+}

@@ -1,0 +1,9 @@
+{
+    "type"   : "normal",
+    "source" : "dffsynth10.v",
+    "iverilog-args" : [ "-S" ],
+    "vlog95" : {
+        "__comment" : "No support for arrayed UDPs",
+        "type"      : "TE"
+    }
+}

@@ -1,0 +1,41 @@
+
+name: Deploy documentation
+
+on:
+  # Every push onto the main branch regerenates the documentation
+  push:
+    branches:
+      - 'master'
+
+jobs:
+
+  do-deploy:
+    runs-on: ubuntu-latest
+    name: 'Build documentation on Linux'
+    steps:
+
+    - uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        sudo apt update -qq
+        sudo apt install -y make autoconf python3-venv
+        python3 -m venv .venv
+        . .venv/bin/activate
+        pip install --upgrade pip
+        pip install -r Documentation/requirements.txt
+
+    - name: Make Documentation
+      run: |
+        . .venv/bin/activate
+        cd Documentation
+        make html
+
+    - name: Deploy to GitHub Pages
+      uses: crazy-max/ghaction-github-pages@v2
+      with:
+        target_branch: gh-pages
+        build_dir: Documentation/_build/html
+        jekyll: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

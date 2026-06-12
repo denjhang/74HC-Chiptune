@@ -1,0 +1,40 @@
+{
+  "name": "@ice-chips-verilog/scripts",
+  "version": "0.9.0",
+  "description": "Generates and Validates the IceChips source files",
+  "repository": {
+    "type": "git",
+    "branch": "main",
+    "url": "https://github.com/TimRudy/ice-chips-verilog.git"
+  },
+  "keywords": [
+    "74", "74xx", "7400", "74181", "TTL", "74HCT", "74HC", "74LS", "HCT", "HC", "CMOS", "ECL",
+    "7400 Series", "4000 Series", "4000", "Icestudio", "IceStorm", "Verilog", "iverilog", "Icarus",
+    "Simulate", "Simulation", "Model", "Behavioural Model", "Design", "EDA", "EDA Tool", "Free EDA",
+    "Open Hardware", "Open Source", "FOSS EDA", "FOSS Logic", "Verilog Component", "Verilog Module",
+    "Validated", "Verified", "Collection", "Library", "Cell Library", "Circuit Library",
+    "Logic Family", "Discrete Logic", "Glue Logic", "Logic Circuit", "ALU", "Arithmetic Logic Unit",
+    "SSI", "MSI", "IC", "Chip", "Device", "Hardware", "RTL", "FPGA", "FPGAwars", "IP", "IP Core",
+    "IP Design", "Verification IP", "Test Bench", "Synthesis", "Yosys", "Verilator", "HDL", "VHDL",
+    "Gateware", "OpenCores"
+  ],
+  "author": {
+    "name": "Tim Rudy",
+    "url": "https://github.com/TimRudy"
+  },
+  "license": "GPL-3.0-or-later",
+  "bugs": "https://github.com/TimRudy/ice-chips-verilog/issues",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "editorconfig": "^3.0.2",
+    "npm-run-all2": "^8.0.4",
+    "walk-sync": "^4.0.1"
+  },
+  "scripts": {
+    "test": "npm-run-all2 -p exec-verilog check-index check-verilog-code",
+    "exec-verilog": "node validate/exec-verilog.js -s",
+    "check-index": "node validate/check-index-contents.js",
+    "check-verilog-code": "node validate/check-verilog-line-lengths.js"
+  }
+}

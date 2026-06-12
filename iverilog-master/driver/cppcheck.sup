@@ -1,0 +1,31 @@
+// cppcheck is wrong this is correct usage
+syntaxError:main.c:410
+syntaxError:main.c:413
+
+// cppcheck is missing the code adds a \0 at the previous location.
+knownConditionTrueFalse:main.c:1123
+redundantAssignment:main.c:1122
+
+// Skip all memory issues since they should be handled by ivl_alloc.h
+memleakOnRealloc
+nullPointerArithmeticOutOfMemory
+nullPointerOutOfMemory
+
+// Errors/limitations in the generated yacc and lex files
+duplicateBreak:cflexor.lex
+constVariablePointer:cfparse.y
+memleakOnRealloc:cfparse.y
+allocaCalled:cfparse.c
+constParameterPointer:cfparse.c
+constVariablePointer:cfparse.c
+invalidPrintfArgType_sint:cfparse.c
+knownConditionTrueFalse:cfparse.c
+sizeofwithnumericparameter:cfparse.c
+unsignedPositive:cfparse.c
+constVariablePointer:<stdout>
+duplicateBreak:<stdout>
+nullPointer:<stdout>
+redundantInitialization:<stdout>
+staticFunction:<stdout>
+syntaxError:<stdout>
+unusedFunction:<stdout>

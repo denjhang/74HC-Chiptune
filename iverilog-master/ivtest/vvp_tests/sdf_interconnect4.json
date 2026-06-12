@@ -1,0 +1,10 @@
+{
+    "type"          : "normal",
+    "source"        : "sdf_interconnect4.v",
+    "iverilog-args" : [ "-Ttyp", "-ginterconnect", "-gspecify" ],
+    "gold"   : "sdf_interconnect4",
+    "vlog95" : {
+        "__comment" : "The buffer module output is not connected.",
+	"type"      : "TE"
+    }
+}

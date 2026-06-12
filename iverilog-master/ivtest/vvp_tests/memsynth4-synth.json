@@ -1,0 +1,10 @@
+{
+    "__comment" : "Synthesis not implemented for this yet.",
+    "type" : "normal",
+    "source" : "memsynth4.v",
+    "iverilog-args" : [ "-S" ],
+    "vlog95" : {
+        "__comment" : "Array nets not supported",
+        "type" : "CE"
+    }
+}

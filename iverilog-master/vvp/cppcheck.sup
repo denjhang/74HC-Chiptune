@@ -1,0 +1,250 @@
+// Skip the use STL messages
+//useStlAlgorithm
+
+// Skip all memory issues since they should be handled by ivl_alloc.h
+ctunullpointerOutOfMemory
+nullPointerArithmeticOutOfMemory
+nullPointerOutOfMemory
+
+// Skip strdup() not constant.
+//constVariablePointer:main.cc:400
+
+// Only for conditional debugging
+knownConditionTrueFalse:lib_main.cc:282
+
+// For now these casts have to be used
+dangerousTypeCast:array_common.cc:188
+dangerousTypeCast:array_common.cc:201
+invalidPointerCast:class_type.cc:203
+invalidPointerCast:class_type.cc:326
+invalidPointerCast:class_type.cc:332
+invalidPointerCast:class_type.cc:338
+invalidPointerCast:class_type.cc:339
+cstyleCast:ufunc.cc:80
+cstyleCast:vpi_priv.cc:229
+cstyleCast:vpi_scope.cc:603
+
+// Skip the sscanf() field width limit warning
+invalidscanf:compile.cc:597
+invalidscanf:compile.cc:609
+
+// By convention we put statics at the top scope.
+variableScope:vpi_priv.cc:647
+
+// Changing this breaks the compile
+constParameterPointer:vthread.cc:423
+useInitializationList:delay.cc:513
+constParameterPointer:vpi_priv.cc:1458
+
+// Operator new/delete are static so cannot override
+duplInheritedMember:vvp_net.h:1481
+duplInheritedMember:vvp_net.h:1482
+duplInheritedMember:vvp_net_sig.h:187
+duplInheritedMember:vvp_net_sig.h:188
+duplInheritedMember:vvp_net_sig.h:253
+duplInheritedMember:vvp_net_sig.h:254
+duplInheritedMember:vvp_net_sig.h:313
+duplInheritedMember:vvp_net_sig.h:314
+duplInheritedMember:vvp_net_sig.h:377
+duplInheritedMember:vvp_net_sig.h:378
+duplInheritedMember:vvp_net_sig.cc:442
+duplInheritedMember:vvp_net_sig.cc:580
+duplInheritedMember:vvp_net_sig.cc:585
+duplInheritedMember:vvp_net_sig.cc:697
+duplInheritedMember:vvp_net_sig.cc:702
+duplInheritedMember:vvp_net_sig.cc:810
+duplInheritedMember:vvp_net_sig.cc:815
+duplInheritedMember:schedule.cc:143
+duplInheritedMember:schedule.cc:149
+duplInheritedMember:schedule.cc:213
+duplInheritedMember:schedule.cc:219
+duplInheritedMember:schedule.cc:250
+duplInheritedMember:schedule.cc:256
+duplInheritedMember:schedule.cc:287
+duplInheritedMember:schedule.cc:293
+duplInheritedMember:schedule.cc:320
+duplInheritedMember:schedule.cc:326
+duplInheritedMember:schedule.cc:393
+duplInheritedMember:schedule.cc:399
+duplInheritedMember:schedule.cc:484
+duplInheritedMember:schedule.cc:490
+duplInheritedMember:schedule.cc:525
+duplInheritedMember:schedule.cc:531
+
+// The derived class calls the base class routine and uses private inheritance
+duplInheritedMember:symbols.h:112
+
+// This is not always true
+duplicateValueTernary:class_type.cc:268
+
+// cppcheck is wrong this can be true or false
+knownConditionTrueFalse:vthread.cc:2986
+knownConditionTrueFalse:vpi_priv.cc:681
+knownConditionTrueFalse:vpi_priv.cc:2030
+
+// cppcheck is wrong this is already const
+constParameterPointer:vpi_tasks.cc:259
+
+// cppcheck is wrong. When all bits are 1 this is false
+knownConditionTrueFalse:vthread.cc:3571
+
+// For some cases this expression can be different
+duplicateExpression:vpi_signal.cc:1207
+
+// cppcheck does not relize this is deleted[] in the called routine
+leakNoVarFunctionCall:compile.cc:452
+
+// Yes, these are not currently initialized in the constructor
+// All are added after __vpiSysTaskCall is built
+uninitMemberVar:vpi_priv.h:946
+// All are added after __vpiSignal is built
+uninitMemberVar:vpi_priv.h:394
+// run_run_ptr is added after the event is built
+uninitMemberVar:delay.h:79
+// The array values are added after it is allocated
+noConstructor:vpi_priv.h:780
+// The enum values are added after this is built
+uninitMemberVar:enum_type.cc:54
+// The names for the enum values are added after allocation
+uninitMemberVar:enum_type.cc:100
+// The thread values get assigned after being created
+uninitMemberVar:vthread.cc:316
+// The mod path has the values added after creation
+uninitMemberVar:delay.cc:1006
+uninitMemberVar:delay.cc:1046
+// The intermod path has the values added after creation
+uninitMemberVar:delay.cc:1396
+// The island values are set after creation
+uninitDerivedMemberVar:island_tran.cc:60
+// The cb_data is set after creation
+uninitMemberVar:vpi_callback.cc:182
+// The funct is set after creation
+uninitMemberVar:vpi_event.cc:28
+// Iterator values are set after creation
+uninitMemberVar:vpi_iter.cc:41
+// Scope values are set after creation
+uninitMemberVar:vpi_scope.cc:341
+// The real var values are set after creation
+uninitMemberVar:vpi_real.cc:158
+// The PV values are set after creation
+uninitMemberVar:vpi_signal.cc:1595
+// The info/is_user_defn are added ater creation
+uninitMemberVar:vpi_tasks.cc:41
+// All the values are set after creation using the default constructor
+noConstructor:vpi_tasks.cc:158
+
+// We check memory usage using valgrind.
+unsafeClassCanLeak:vpi_priv.h:752
+unsafeClassCanLeak:permaheap.h:47
+
+// Index calculation
+thisSubtraction:vpi_priv.h:432
+thisSubtraction:array_common.h:91
+
+// The interface is from the standard.
+constParameterCallback:vpi_priv.cc:1134
+constParameterPointer:vpi_priv.cc:1134
+constParameterPointer:vpi_mcd.cc:158
+
+// cppcheck is missing the code adds a \0 at the previous location.
+knownConditionTrueFalse:vpi_modules.cc:118
+redundantAssignment:vpi_modules.cc:117
+
+// cppcheck does not undestand the format types match
+invalidScanfArgType_int:compile.cc:597
+invalidScanfArgType_int:compile.cc:603
+invalidScanfArgType_int:compile.cc:609
+invalidScanfArgType_int:vthread.cc:4541
+invalidScanfArgType_int:vthread.cc:4544
+invalidScanfArgType_int:vthread.cc:4547
+invalidScanfArgType_int:vthread.cc:4550
+
+// The new() operator is always used to allocate space for this class and
+// pool is defined there.
+uninitMemberVar:vvp_net.cc:192
+
+// These functions are not used by Icarus
+// vpi_chk_error()
+unusedFunction:vpi_priv.cc:193
+// vpi_compare_objects()
+unusedFunction:vpi_priv.cc:209
+// vpi_control()
+unusedFunction:vpi_priv.cc:1913
+// vpi_flush()
+unusedFunction:vpi_priv.cc:1519
+// vpi_fopen()
+unusedFunction:vpi_mcd.cc:287
+// vpi_get_file()
+unusedFunction:vpi_mcd.cc:321
+// vpi_get_systf_info()
+unusedFunction:vpi_priv.cc:225
+// vpi_get_time()
+unusedFunction:vpi_priv.cc:532
+// vpi_get_userdata()
+unusedFunction:vpi_tasks.cc:1020
+// vpi_get_vlog_info()
+unusedFunction:vpi_priv.cc:561
+// vpi_handle_by_index()
+unusedFunction:vpi_priv.cc:1273
+// vpi_handle_by_name()
+unusedFunction:vpi_priv.cc:1356
+// vpi_mcd_close()
+unusedFunction:vpi_mcd.cc:111
+// vpi_mcd_name()
+unusedFunction:vpi_mcd.cc:138
+// vpi_mcd_open()
+unusedFunction:vpi_mcd.cc:153
+// vpi_put_userdata()
+unusedFunction:vpi_tasks.cc:1010
+// vpi_register_cb()
+unusedFunction:vpi_callback.cc:552
+// vpi_register_systf()
+unusedFunction:vpi_tasks.cc:990
+// vpi_remove_cb()
+unusedFunction:vpi_callback.cc:601
+// vpi_sim_control()
+unusedFunction:vpi_priv.cc:1904
+// vpi_vprintf()
+unusedFunction:vpi_priv.cc:1505
+
+// The following are just unused.
+// alias_word()
+unusedFunction:array.cc:848
+// intermodpath_delete()
+unusedFunction:delay.cc:1463
+// count_force4_pool()
+unusedFunction:schedule.cc:404
+// call_scope()
+unusedFunction:ufunc.h:62
+// get_bit()
+unusedFunction:vpi_priv.h:479
+// copy_bits()
+unusedFunction:vvp_net.cc:615
+// mov()
+unusedFunction:vvp_net.cc:1547
+// eq_xz()
+unusedFunction:vvp_net.cc:1752
+// as_string()
+unusedFunction:vvp_net.cc:1855
+// fully_featured_resolv_()
+unusedFunction:vvp_net.cc:3704
+// words()
+unusedFunction:vvp_net.h:600
+// force_vec8()
+unusedFunction:vvp_net_sig.cc:128
+
+// Unused functions from the lexor
+duplicateBreak:lexor.lex
+duplicateBreak:lexor.cc
+unusedStructMember:lexor.lex
+constVariablePointer:lexor.cc
+cstyleCast:lexor.cc
+knownConditionTrueFalse:lexor.cc
+nullPointer:lexor.cc
+redundantInitialization:lexor.cc
+unusedFunction:lexor.cc
+unusedStructMember:lexor.cc
+allocaCalled:parse.cc
+constParameterPointer:parse.cc
+constVariablePointer:parse.cc
+knownConditionTrueFalse:parse.cc

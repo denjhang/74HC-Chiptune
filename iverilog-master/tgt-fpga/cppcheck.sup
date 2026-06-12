@@ -1,0 +1,6 @@
+// Skip strdup() not constant.
+constVariablePointer:xilinx.c:323
+constVariablePointer:xilinx.c:445
+
+// Skip all memory issues since they should be handled by ivl_alloc.h
+nullPointerOutOfMemory

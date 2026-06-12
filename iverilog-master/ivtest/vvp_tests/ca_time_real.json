@@ -1,0 +1,13 @@
+{
+    "type"   : "normal",
+    "source" : "ca_time_real.v",
+    "gold"   : "ca_time_real",
+    "strict" : {
+        "gold"   : "ca_time_real_std"
+    },
+    "vlog95" : {
+        "__comment" : "Real nets are not supported",
+        "type"      : "CE",
+        "gold"      : ""
+    }
+}
