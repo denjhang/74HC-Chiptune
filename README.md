@@ -1,2 +1,2 @@
 # 74HC-Chiptune
-A 4-channel wavetable synthesizer built entirely from 74HC-series logic, SRAM, and Flash ROM — no MCU, no FPGA. The core architecture uses a lookup-table accumulator: phase accumulation via 74283 adders, waveform×volume mapping from a pre-computed 39SF040 ROM table, and register storage in 62256 SRAM. Only 9 ICs total. MIDI-like parallel bus interface for step/volume/envelope control from a host MCU.
+A 4-channel wavetable synthesizer using only 74HC logic, SRAM, and Flash ROM. A lookup-table accumulator replaces all arithmetic: 74283 adders do phase accumulation, a pre-computed 39SF040 ROM handles wave×level×vol, and 62256 SRAM stores registers. 9 ICs, parallel bus interface.
