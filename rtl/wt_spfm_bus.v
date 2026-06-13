@@ -1,24 +1,22 @@
 // wt_spfm_bus.v — SPFM 总线接口 (74HC 芯片实例化)
 //
-// 同步链 (适配单时钟 10MHz, 参考 YM2413 IKAOPLL):
-//   1. 74373 透明锁存: /CS=0 & /WR=0 时 D 跟随，异步捕获
-//   2. 2级同步器 (74174 D-FF): 消除亚稳态
-//   3. 上升沿检测: 产生 1-clock 宽脉冲
+// 芯片清单 (3 IC):
+//   U1: 74HC373 — D[7:0] 透明锁存
+//   U2: 74HC174 — 两路同步器 (addr + data, 6 D-FF)
+//   U3: 74HC377 — 地址寄存器 (8-bit)
 //
-// 两路独立:
-//   addr_wr: A0=0, /CS=0, /WR=0 → 地址写脉冲
-//   data_wr: A0=1, /CS=0, /WR=0 → 数据写脉冲
-//
-// 写时序: 脉冲宽度 ≥3 个时钟 (2 拍同步 + 1 拍余量)
-// 地址/数据写间隔: ≥4 个时钟 (同步器自清除时间)
+// 同步链: 异步请求 → 2级 D-FF 同步 → 上升沿检测 → 1-clock 脉冲
+// 写时序: 脉冲 ≥3 clocks, 地址/数据间隔 ≥4 clocks
 
 `timescale 1ns/1ps
 
 // ================================================================
-// 74HC 芯片模型
+// 74HC 芯片定义
 // ================================================================
 
-// 74373 — 八D透明锁存
+// 74HC373 — 八D透明锁存
+// LE=1: Q 跟随 D (透明)
+// LE=0: Q 锁存
 module hc373 (
     input         LE,
     input  [7:0]  D,
@@ -31,7 +29,9 @@ module hc373 (
     assign Q = latch;
 endmodule
 
-// 74174 — 六D触发器 (上升沿)
+// 74HC174 — 六D触发器 (上升沿, 异步清零)
+// posedge CLK: Q <= D
+// nCLR=0: Q <= 0 (异步)
 module hc174 (
     input         CLK,
     input         nCLR,
@@ -45,48 +45,42 @@ module hc174 (
     end
 endmodule
 
-// ================================================================
-// 写请求同步器
-//
-// 2级 D-FF 同步器 + 上升沿检测
-// 输入: 异步写请求 (组合逻辑: CS_n & WR_n & A0 条件)
-// 输出: 同步后 1-clock 宽脉冲
-//
-// 硬件映射:
-//   sync[0]: 74174 D-FF (posedge CLK 采样异步输入)
-//   sync[1]: 74174 D-FF (消除亚稳态)
-//   sync_d:  74174 D-FF (延迟 1 拍, 用于边沿检测)
-//   o_OUT:   组合逻辑 AND(sync[1], ~sync_d)
-// ================================================================
-module write_synchronizer (
-    input  wire CLK,
-    input  wire RST_n,
-    input  wire i_IN,
-    output wire o_OUT
+// 74HC377 — 八D触发器 (上升沿, 使能)
+// Enable_bar=0 且 posedge Clk: Q <= D
+// Enable_bar=1: Q 保持
+module hc377 (
+    input             Enable_bar,
+    input      [7:0]  D,
+    input             Clk,
+    output reg [7:0]  Q
 );
-
-    reg [1:0] sync = 2'b00;
-    reg       sync_d = 1'b0;
-
-    always @(posedge CLK or negedge RST_n) begin
-        if (!RST_n) begin
-            sync   <= 2'b00;
-            sync_d <= 1'b0;
-        end else begin
-            sync[0] <= i_IN;         // 第1级: 采样异步输入
-            sync[1] <= sync[0];      // 第2级: 消除亚稳态
-            sync_d  <= sync[1];      // 延迟 1 拍
-        end
+    initial Q = 8'd0;
+    always @(posedge Clk) begin
+        if (!Enable_bar) Q <= D;
     end
-
-    assign o_OUT = sync[1] & ~sync_d;
-
 endmodule
 
 // ================================================================
-// SPFM 总线接口
+// SPFM 总线接口顶层
+//
+// U1: 74HC373 — 透明锁存 D[7:0]
+//     LE  = ~CS_n & ~WR_n & RST_n  (CS=0,WR=0,RST=1 时透明)
+//     D   = D[7:0] (总线)
+//     Q   = d_latched (锁存后数据)
+//
+// U2: 74HC174 — 两路同步器 (6 D-FF)
+//     D[0] = addr_req, D[1] = addr_sync0, D[2] = addr_sync1
+//     D[3] = data_req, D[4] = data_sync0, D[5] = data_sync1
+//     Q    → 2级同步 + 边沿检测
+//
+// U3: 74HC377 — 地址寄存器
+//     Enable_bar = ~addr_wr (addr_wr=1 时使能)
+//     D          = d_latched
+//     Clk        = CLK
+//     Q          = reg_addr
 // ================================================================
 module wt_spfm_bus (
+    // SPFM 总线 (来自主机)
     input  wire        CLK,
     input  wire        RST_n,
     input  wire [7:0]  D,
@@ -95,39 +89,75 @@ module wt_spfm_bus (
     input  wire        WR_n,
     input  wire        RD_n,
 
+    // 内部寄存器输出
     output wire [7:0]  reg_addr,
     output wire [7:0]  reg_data,
     output wire        addr_wr,
     output wire        data_wr
 );
 
-    // 第1级: 74373 透明锁存
+    // ============================================================
+    // U1: 74HC373 — D[7:0] 透明锁存
+    // ============================================================
     wire le = ~CS_n & ~WR_n & RST_n;
 
     wire [7:0] d_latched;
-    hc373 u_dbus_latch (.LE(le), .D(D), .Q(d_latched));
+    hc373 U1 (
+        .LE (le),
+        .D  (D),
+        .Q  (d_latched)
+    );
 
-    // 第2级: 写请求同步器
+    // ============================================================
+    // U2: 74HC174 — 两路同步器
+    //
+    // addr 路径: D[0]=addr_req → Q[0]=addr_sync0
+    //            D[1]=addr_sync0 → Q[1]=addr_sync1
+    //            D[2]=addr_sync1 → Q[2]=addr_sync1_d (边沿检测)
+    //
+    // data 路径: D[3]=data_req → Q[3]=data_sync0
+    //            D[4]=data_sync0 → Q[4]=data_sync1
+    //            D[5]=data_sync1 → Q[5]=data_sync1_d
+    // ============================================================
     wire addr_req = ~CS_n & ~WR_n & ~A0;
     wire data_req = ~CS_n & ~WR_n &  A0;
 
-    write_synchronizer u_sync_addr (
-        .CLK(CLK), .RST_n(RST_n), .i_IN(addr_req), .o_OUT(addr_wr)
+    wire [5:0] u2_d;
+    wire [5:0] u2_q;
+
+    // addr 路径反馈: Q → 下一级 D
+    assign u2_d[0] = addr_req;        // 第1级: 采样异步输入
+    assign u2_d[1] = u2_q[0];         // 第2级: 同步
+    assign u2_d[2] = u2_q[1];         // 第3级: 延迟(边沿检测)
+
+    // data 路径反馈
+    assign u2_d[3] = data_req;
+    assign u2_d[4] = u2_q[3];
+    assign u2_d[5] = u2_q[4];
+
+    hc174 U2 (
+        .CLK  (CLK),
+        .nCLR (RST_n),
+        .D    (u2_d),
+        .Q    (u2_q)
     );
 
-    write_synchronizer u_sync_data (
-        .CLK(CLK), .RST_n(RST_n), .i_IN(data_req), .o_OUT(data_wr)
-    );
+    // 上升沿检测: sync1 & ~sync1_d = 1-clock 脉冲
+    assign addr_wr = u2_q[1] & ~u2_q[2];
+    assign data_wr = u2_q[4] & ~u2_q[5];
 
-    // 第3级: 地址寄存器 (addr_wr 时锁存)
-    reg [7:0] reg_addr_r;
-    always @(posedge CLK or negedge RST_n) begin
-        if (!RST_n)
-            reg_addr_r <= 8'h00;
-        else if (addr_wr)
-            reg_addr_r <= d_latched;
-    end
-    assign reg_addr = reg_addr_r;
+    // ============================================================
+    // U3: 74HC377 — 地址寄存器
+    // addr_wr=1 时 Enable_bar=0 → posedge CLK 锁存 d_latched
+    // ============================================================
+    wire [7:0] reg_addr_w;
+    hc377 U3 (
+        .Enable_bar (~addr_wr),
+        .D          (d_latched),
+        .Clk        (CLK),
+        .Q          (reg_addr_w)
+    );
+    assign reg_addr = reg_addr_w;
 
     // 数据透传 (由下游在 data_wr 时采样)
     assign reg_data = d_latched;

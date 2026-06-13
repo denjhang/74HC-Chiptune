@@ -81,36 +81,47 @@ YM2413 风格，两步写：
 | 数据锁存 | dlatch (行为级) | 74HC373 (实际芯片) |
 | 脉冲宽度 | 1 phase | 1 clock |
 
-### 硬件连接
+### 硬件连接 (芯片实例化)
 
 ```
-write_synchronizer ×2 (共用 1 片 74HC174):
-  sync[0] ← D-FF (posedge CLK, 采样 addr_req/data_req)
-  sync[1] ← D-FF (posedge CLK, 消除亚稳态)
-  sync_d  ← D-FF (posedge CLK, 延迟 1 拍)
-  o_OUT   = sync[1] & ~sync_d  (上升沿 → 1-clock 脉冲)
+U1: 74HC373 — 透明锁存 D[7:0]
+  .LE  = ~CS_n & ~WR_n & RST_n
+  .D   = D[7:0]
+  .Q   = d_latched
 
-wt_spfm_bus:
-  le        = ~CS_n & ~WR_n & RST_n
-  d_latched ← HC373 (LE=le, D=D[7:0])
-  addr_req  = ~CS_n & ~WR_n & ~A0
-  data_req  = ~CS_n & ~WR_n &  A0
-  addr_wr   ← write_synchronizer(addr_req)
-  data_wr   ← write_synchronizer(data_req)
-  reg_addr  ← HC377 (posedge CLK, addr_wr 时锁存 d_latched)
-  reg_data  = d_latched (透传，下游在 data_wr 时采样)
+U2: 74HC174 — 两路同步器 (6 D-FF)
+  .CLK  = CLK
+  .nCLR = RST_n
+  .D[0] = addr_req = ~CS_n & ~WR_n & ~A0
+  .D[1] = Q[0]  (addr_sync0 → 第2级)
+  .D[2] = Q[1]  (addr_sync1 → 边沿检测延迟)
+  .D[3] = data_req = ~CS_n & ~WR_n & A0
+  .D[4] = Q[3]  (data_sync0 → 第2级)
+  .D[5] = Q[4]  (data_sync1 → 边沿检测延迟)
+  addr_wr = Q[1] & ~Q[2]  (上升沿 → 1-clock 脉冲)
+  data_wr = Q[4] & ~Q[5]
+
+U3: 74HC377 — 地址寄存器
+  .Enable_bar = ~addr_wr
+  .D          = d_latched
+  .Clk        = CLK
+  .Q          = reg_addr
+
+reg_data = d_latched  (透传，下游在 data_wr 时采样)
 ```
 
 ### 验证结果（2026-06-13）
 
+全部芯片实例化，15 次写入全部正确。
+
 | 测试项 | 结果 |
 |--------|------|
-| CTRL (0x00, 0x02) | PASS: addr=00, data=02 |
-| step_lo (0x04, 0x67) | PASS: addr=04, data=67 |
-| step_hi (0x05, 0x00) | PASS: addr=05, data=00 |
-| note_on (0x06, 0x01) | PASS: addr=06, data=01 |
-| 10 次连续写入 | PASS: 全部正确 |
-| 复位 | PASS: reg_addr 清零 |
+| CTRL (0x00, 0x02) | PASS |
+| step_lo (0x04, 0x67) | PASS |
+| step_hi (0x05, 0x00) | PASS |
+| note_on (0x06, 0x01) | PASS |
+| 10 次连续写入 | PASS |
+| 复位 (RST_n → 174 nCLR) | PASS |
 
 ### iverilog 仿真注意事项
 
