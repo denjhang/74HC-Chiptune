@@ -7,10 +7,10 @@
 ```
 SPFM 总线 → 373/174/377 (3 IC) → 7134 参数 RAM → 合成器数据通路
                                                         ↓
-3.072MHz / 32 = 96kHz                                  hc161×2 → 指令 ROM (39SF040)
+3.072MHz / 32 = 96kHz                                  hc161×2 → 指令 ROM (39SF040, 8-bit)
 32 步循环: v0(8步) + v1(8步) + v2(8步) + NOP(8步)       ↓
 每通道: 5累加 + vol读 + wave读 + ROM查表 = 8步
-混音: 软件加法, 3通道 8-bit 值累加到 273 输出
+混音: 3通道 8-bit 值累加到 273 输出
 ```
 
 ## 时钟
@@ -19,7 +19,7 @@ SPFM 总线 → 373/174/377 (3 IC) → 7134 参数 RAM → 合成器数据通路
 - STEP_CLK → hc161×2 CP → 32 步循环 (5-bit step counter)
 - 96kHz = 3.072MHz / 32 (step 跑一轮 = 一个采样周期)
 
-## 芯片清单 (10 IC)
+## 芯片清单 (9 IC)
 
 | 部分 | 芯片 | 数量 | 说明 |
 |------|------|------|------|
@@ -30,10 +30,10 @@ SPFM 总线 → 373/174/377 (3 IC) → 7134 参数 RAM → 合成器数据通路
 | | 74HC283 | 1 | 4-bit 全加器 (相位累加) |
 | | 74HC174 | 1 | 累加器锁存 + vol/wave 锁存 |
 | | 74HC273 | 1 | 混音输出锁存 (dac_out) |
-| | 39SF040 | 3 | 指令 ROM (2片) + 波表 ROM |
+| | 39SF040 | 2 | 指令 ROM (8-bit) + 波表 ROM |
 | | 7134 | 1 | 双端口参数 RAM |
 | | 62256 | 1 | phase 存储 |
-| **总计** | | **10** | |
+| **总计** | | **9** | |
 
 ## 32 步循环
 
@@ -49,23 +49,44 @@ step  7: v0 ROM 查表 → 混音锁存
 
 step  8-15: v1 同上
 step 16-23: v2 同上 (查表后同时锁存 dac_out)
-step 24-31: NOP (0x6FFF)
+step 24-31: NOP (step[4:3]=11, 硬件自动屏蔽所有操作)
 ```
 
-## 指令 ROM 控制字格式 (16-bit)
+## 微程序控制 (8-bit 控制字)
 
-每步 16-bit, 存在 39SF040 指令 ROM (2片拼 16-bit), 地址 = step × 2
+本设计使用微程序控制（非流水线）——ROM 存控制字驱动数据通路，32 步固定循环。
 
-| Bit | 名称 | 说明 |
-|-----|------|------|
-| 15 | adder_clk | 1=上升沿锁存 283 加法结果 |
-| 13 | adder_clr_n | 0=清零加法器 (每通道第一步) |
-| 12 | out_latch | 1=查表步, 锁存 ROM 输出到 mix |
-| 11 | param_oe_n | 0=读 7134 参数 |
-| 10 | ram_oe_n | 0=读 62256 phase |
-| 9 | rom_oe_n | 0=读波表 ROM |
-| 7:4 | param_addr | 7134 子地址: 0-4=freq, 5=wave, 6=vol |
-| 3:0 | voice_sel | 当前通道 (0/1/2) |
+### 控制字格式 (8-bit)
+
+每步 8-bit, 存在 39SF040 指令 ROM, 地址 = step (0-31)
+
+```
+bit 7:   adder_clk    1=锁存 283 加法结果
+bit 6:   out_latch    1=查表步, 锁存 ROM 输出到 mix
+bit 5:   param_oe_n   0=读 7134 参数
+bit 4:   ram_oe_n     0=读 62256 phase
+bit 3:   rom_oe_n     0=读波表 ROM
+bit 2:   adder_clr_n  0=清零加法器 (每通道第一步)
+bit 1:   reserved
+bit 0:   reserved
+```
+
+### 硬件推导信号 (不存 ROM)
+
+```
+voice_sel  = step[4:3]    (00=v0, 01=v1, 10=v2, 11=NOP)
+param_addr = step[2:0]    (0-4=freq nibble, 5=wave, 6=vol)
+```
+
+### 控制字编码表
+
+| 步类型 | step[2:0] | 编码 | 说明 |
+|--------|-----------|------|------|
+| accum clr+nib0 | 0 | 0x88 | 清零加法器, 累加 freq nibble 0 |
+| accum nib1-4 | 1-4 | 0x94 | 累加 freq nibble 1-4 |
+| vol/wave read | 5-6 | 0x1C | 读 7134 vol/wave 参数 |
+| lookup | 7 | 0x74 | 波表 ROM 查表, 混音累加 |
+| NOP | x | 0x3C | 空闲 |
 
 ## 波表 ROM (128 点)
 
@@ -73,8 +94,7 @@ step 24-31: NOP (0x6FFF)
 
 - 8 种波形 × 16 音量 × 256 索引 = 32768 字节 (32KB)
 - 波形 128 点, 4-bit 无符号 (0-15), 预计算 wave[sample] × vol = 8-bit (0-225)
-- phase[19:12] 为 8-bit, 超过 128 的索引自动循环 (idx % 128)
-- 存在第三片 39SF040
+- 存在第二片 39SF040
 
 ### 波形列表
 
@@ -97,8 +117,6 @@ step 24-31: NOP (0x6FFF)
 | voice×8 + 5 | wave_idx | 波形选择 (低 3 bit) |
 | voice×8 + 6 | vol | 音量 (低 4 bit, 0=静音, 15=最大) |
 
-Right 端口地址 = {7'b0, voice[3:0], 3'b0} + {8'b0, param_addr[3:0]}
-
 ## Phase RAM (62256) 地址映射
 
 | 地址 | 字段 | 说明 |
@@ -111,19 +129,19 @@ Right 端口地址 = {7'b0, voice[3:0], 3'b0} + {8'b0, param_addr[3:0]}
 
 | 音符 | 频率 | step (20-bit) |
 |------|------|---------------|
-| C4 | 261.63 | 0x0B2A |
-| D4 | 293.66 | 0x0C88 |
-| E4 | 329.63 | 0x0E14 |
-| F4 | 349.23 | 0x0EE7 |
-| G4 | 392.00 | 0x10BA |
-| A4 | 440.00 | 0x12C6 |
-| B4 | 493.88 | 0x1513 |
-| C5 | 523.25 | 0x1653 |
+| C4 | 261.63 | 0x00595 |
+| D4 | 293.66 | 0x00644 |
+| E4 | 329.63 | 0x00708 |
+| F4 | 349.23 | 0x00773 |
+| G4 | 392.00 | 0x0085D |
+| A4 | 440.00 | 0x00963 |
+| B4 | 493.88 | 0x00A89 |
+| C5 | 523.25 | 0x00B2A |
 
 ## 音域
 
 - 最低音 (step=1): 96000 / 2^20 = **0.091 Hz**
-- 最高音 (step=0xFFFFF): **2963 Hz**
+- 最高音 (step=0xFFFFF): **6000 Hz**
 
 ## 混音与输出
 
@@ -142,7 +160,7 @@ Right 端口地址 = {7'b0, voice[3:0], 3'b0} + {8'b0, param_addr[3:0]}
 | reg | 对应硬件 | 说明 |
 |-----|---------|------|
 | accum_q[5:0] | 74HC174 | 累加器锁存 (含进位) |
-| phase_mem[0:19] | 74HC62256 | 20 个 4-bit phase nibble |
+| phase_mem[0:14] | 74HC62256 | 15 个 4-bit phase nibble (3 voice × 5) |
 | phase_v0/v1/v2 | 62256 内容 | 3×20-bit phase 寄存器 |
 | mix_out[7:0] | 74HC273 | 混音累加器 |
 | cur_vol_r, cur_wave_r | 74HC174 | vol/wave 锁存 |
@@ -166,7 +184,7 @@ Right 端口地址 = {7'b0, voice[3:0], 3'b0} + {8'b0, param_addr[3:0]}
 
 | 文件 | 用途 | 大小 |
 |------|------|------|
-| rom/rom_instruction.hex | 指令 ROM (gen_rom.py 生成) | 512KB |
+| rom/rom_instruction.hex | 指令 ROM (gen_rom.py 生成, 32 字节有效) | 512KB |
 | rom/rom_wavetable.hex | 波表 ROM (gen_rom.py 生成, 32KB 有效) | 512KB |
 | rom/gen_rom.py | ROM 生成脚本 | - |
 
@@ -174,4 +192,3 @@ Right 端口地址 = {7'b0, voice[3:0], 3'b0} + {8'b0, param_addr[3:0]}
 
 - Pac-Man 技术文档: `reference/Namco WSG/Pac-Man技术文档_extracted/`
 - Pac-Man Emulation Guide: `reference/Namco WSG/PacmanEmulation_extracted/`
-- STC32G WT 合成: `D:\working\vscode-projects\STC_Chiptune\STC32G12K128\wt.c`

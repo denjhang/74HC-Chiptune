@@ -92,13 +92,6 @@ module wt_top_tb;
 
         // 96kHz 采样率: step = freq * 2^20 / 96000
         // A4 440Hz → step = 4806 = 0x12C6
-        // C5 523Hz → step = 5713 = 0x1651
-        // E4 330Hz → step = 3604 = 0x0E14
-
-        // 96kHz 采样率: step = freq * 2^20 / 96000
-        // A4 440Hz → step = 4806 = 0x12C6
-        // C5 523Hz → step = 5713 = 0x1651
-        // E4 330Hz → step = 3604 = 0x0E14
 
         write_voice(4'd0, 20'h12C6, 3'd0, 4'd15);  // A4 sine vol=15, 单通道
         write_voice(4'd1, 20'h0000, 3'd0, 4'd0);

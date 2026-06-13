@@ -1,18 +1,18 @@
-// wt_top.v — 74HC-Chiptune 顶层模块 (10 IC)
+// wt_top.v — 74HC-Chiptune 顶层模块 (9 IC)
 //
 // 芯片清单:
 //   SPFM 总线 (3 IC): 373, 174, 377
-//   合成器核心 (7 IC): 161×2, 283, 174, 273, 7134, 62256, 39SF040×2
+//   合成器核心 (6 IC): 161×2, 283, 174, 273, 7134, 62256, 39SF040×2
+//     其中 39SF040: 1片指令ROM(8-bit) + 1片波表ROM
 //
 // 时钟: 3.072MHz → 32 步循环 → 96kHz 采样率 (与 WSG 一致)
 // 数据通路:
-//   STEP_CLK → hc161×2(step[4:0]) → 指令ROM(控制字) → 7134+62256+283+174+波表ROM+273
+//   STEP_CLK → hc161×2(step[4:0]) → 指令ROM(8-bit控制字) → 7134+62256+283+174+波表ROM+273
+//   voice_sel = step[4:3], param_addr = step[2:0] (硬件推导, 不存ROM)
 //   SPFM总线 → 7134 Left (CPU写参数)
 //
 // 32 步分配: 3通道 × 8步 = 24 + 8 NOP
 //   每通道: 5累加(nib0-4) + vol读 + wave读 + 查表 = 8步
-//
-// 混音: 查表步用软件加法, 3通道8-bit值累加到273输出
 
 `timescale 1ns/1ps
 
@@ -85,44 +85,31 @@ module wt_top (
     wire [4:0] step = {step_hi_q0, step_lo};
 
     // ============================================================
-    // 指令 ROM (39SF040 #1)
-    // 地址 = step×2 → 低字节, step×2+1 → 高字节
+    // 指令 ROM (39SF040 #1, 8-bit 控制字)
+    // 地址 = step (0-31)
+    // voice_sel = step[4:3], param_addr = step[2:0] (硬件推导)
     // ============================================================
-    wire [18:0] inst_addr_lo = {14'b0, step, 1'b0};
-    wire [18:0] inst_addr_hi = {14'b0, step, 1'b1};
-    wire [7:0]  inst_lo, inst_hi;
-    wire [15:0] ctrl = {inst_hi, inst_lo};
+    wire [18:0] inst_addr = {14'b0, step};
+    wire [7:0]  inst_dq;
 
-    wire        c_adder_clk   = ctrl[15];
-    wire        c_adder_clr_n = ctrl[13];
-    wire        c_out_latch   = ctrl[12];
-    wire        c_param_oe_n  = ctrl[11];
-    wire        c_ram_oe_n    = ctrl[10];
-    wire        c_rom_oe_n    = ctrl[9];
-    wire [3:0]  c_param_addr  = ctrl[7:4];  // 7134 子地址: 0-4=freq, 5=wave, 6=vol
-    wire [3:0]  c_voice       = ctrl[3:0];
+    wire        c_adder_clk   = inst_dq[7];
+    wire        c_out_latch   = inst_dq[6];
+    wire        c_param_oe_n  = inst_dq[5];
+    wire        c_ram_oe_n    = inst_dq[4];
+    wire        c_rom_oe_n    = inst_dq[3];
+    wire        c_adder_clr_n = inst_dq[2];
+    wire [2:0]  c_param_addr  = step[2:0];  // 硬件推导: 0-4=freq, 5=wave, 6=vol
+    wire [1:0]  c_voice       = step[4:3];  // 硬件推导: 00=v0, 01=v1, 10=v2
 
-    hc39sf040 #(.INIT_FILE("rom/rom_instruction.hex")) u_inst_lo (
-        .A0(inst_addr_lo[0]),  .A1(inst_addr_lo[1]),  .A2(inst_addr_lo[2]),
-        .A3(inst_addr_lo[3]),  .A4(inst_addr_lo[4]),  .A5(inst_addr_lo[5]),
-        .A6(inst_addr_lo[6]),  .A7(inst_addr_lo[7]),  .A8(inst_addr_lo[8]),
-        .A9(inst_addr_lo[9]),  .A10(inst_addr_lo[10]), .A11(inst_addr_lo[11]),
-        .A12(inst_addr_lo[12]), .A13(inst_addr_lo[13]), .A14(inst_addr_lo[14]),
-        .A15(inst_addr_lo[15]), .A16(inst_addr_lo[16]), .A17(inst_addr_lo[17]),
-        .A18(inst_addr_lo[18]),
-        .DQ(inst_lo),
-        .CE_n(1'b0), .OE_n(1'b0), .WE_n(1'b1)
-    );
-
-    hc39sf040 #(.INIT_FILE("rom/rom_instruction.hex")) u_inst_hi (
-        .A0(inst_addr_hi[0]),  .A1(inst_addr_hi[1]),  .A2(inst_addr_hi[2]),
-        .A3(inst_addr_hi[3]),  .A4(inst_addr_hi[4]),  .A5(inst_addr_hi[5]),
-        .A6(inst_addr_hi[6]),  .A7(inst_addr_hi[7]),  .A8(inst_addr_hi[8]),
-        .A9(inst_addr_hi[9]),  .A10(inst_addr_hi[10]), .A11(inst_addr_hi[11]),
-        .A12(inst_addr_hi[12]), .A13(inst_addr_hi[13]), .A14(inst_addr_hi[14]),
-        .A15(inst_addr_hi[15]), .A16(inst_addr_hi[16]), .A17(inst_addr_hi[17]),
-        .A18(inst_addr_hi[18]),
-        .DQ(inst_hi),
+    hc39sf040 #(.INIT_FILE("rom/rom_instruction.hex")) u_inst (
+        .A0(inst_addr[0]),  .A1(inst_addr[1]),  .A2(inst_addr[2]),
+        .A3(inst_addr[3]),  .A4(inst_addr[4]),  .A5(inst_addr[5]),
+        .A6(inst_addr[6]),  .A7(inst_addr[7]),  .A8(inst_addr[8]),
+        .A9(inst_addr[9]),  .A10(inst_addr[10]), .A11(inst_addr[11]),
+        .A12(inst_addr[12]), .A13(inst_addr[13]), .A14(inst_addr[14]),
+        .A15(inst_addr[15]), .A16(inst_addr[16]), .A17(inst_addr[17]),
+        .A18(inst_addr[18]),
+        .DQ(inst_dq),
         .CE_n(1'b0), .OE_n(1'b0), .WE_n(1'b1)
     );
 
@@ -137,7 +124,7 @@ module wt_top (
     wire [7:0]  di_L    = reg_data;
 
     // Right 端口地址 = voice×8 + param_addr
-    wire [11:0] addr_R = {7'b0, c_voice, 3'b0} + {8'b0, c_param_addr};
+    wire [11:0] addr_R = {7'b0, c_voice, 3'b0} + {9'b0, c_param_addr};
 
     wire        ce_R_n = c_param_oe_n;
     wire        oe_R_n = c_param_oe_n;
@@ -164,10 +151,10 @@ module wt_top (
     // phase_mem[voice][nibble] — 4 voice × 5 nibble
     // ============================================================
     reg  [5:0] accum_q = 6'd0;
-    reg [3:0] phase_mem [0:19];  // [voice*5 + nib], voice 0-3, nib 0-4
-    integer _i; initial for (_i = 0; _i < 20; _i = _i + 1) phase_mem[_i] = 4'b0;
-    wire [6:0] phase_idx = {c_voice[1:0], c_param_addr[2:0]};
-    wire [3:0] ram_dout = (c_voice < 4) ? phase_mem[phase_idx] : 4'b0;
+    reg [3:0] phase_mem [0:14];  // [voice*5 + nib], voice 0-2, nib 0-4
+    integer _i; initial for (_i = 0; _i < 15; _i = _i + 1) phase_mem[_i] = 4'b0;
+    wire [4:0] phase_idx = {c_voice, c_param_addr};
+    wire [3:0] ram_dout = (c_voice < 3) ? phase_mem[phase_idx] : 4'b0;
 
     // ============================================================
     // hc283 + 累加器寄存器 (原 174, 改为 reg 实现)
@@ -190,8 +177,8 @@ module wt_top (
     // ============================================================
     reg [19:0] phase_v0, phase_v1, phase_v2;
     reg [7:0]  mix_out = 8'd0;
-    reg [3:0]  cur_vol_r;
-    reg [2:0]  cur_wave_r;
+    reg [3:0]  cur_vol_r = 4'd0;
+    reg [2:0]  cur_wave_r = 3'd0;
 
     // ============================================================
     // 波表 ROM 地址 + 输出
@@ -224,17 +211,17 @@ module wt_top (
         if (c_adder_clk) begin
             accum_q <= {accum_q[3], add_c4, add_sum};
             // 写回 phase_mem 和 phase_v*
-            phase_mem[{c_voice[1:0], c_param_addr[2:0]}] <= add_sum;
+            phase_mem[{c_voice, c_param_addr}] <= add_sum;
             case (c_voice)
-                4'd0: phase_v0[c_param_addr[2:0]*4 +: 4] <= add_sum;
-                4'd1: phase_v1[c_param_addr[2:0]*4 +: 4] <= add_sum;
-                4'd2: phase_v2[c_param_addr[2:0]*4 +: 4] <= add_sum;
+                2'd0: phase_v0[c_param_addr*4 +: 4] <= add_sum;
+                2'd1: phase_v1[c_param_addr*4 +: 4] <= add_sum;
+                2'd2: phase_v2[c_param_addr*4 +: 4] <= add_sum;
             endcase
         end
         if (c_param_oe_n == 1'b0 && c_adder_clk == 1'b0) begin
-            if (c_param_addr == 4'd6)
+            if (c_param_addr == 3'd6)
                 cur_vol_r <= do_r[3:0];
-            else if (c_param_addr == 4'd5)
+            else if (c_param_addr == 3'd5)
                 cur_wave_r <= do_r[2:0];
         end
         if (c_out_latch) begin
@@ -249,7 +236,7 @@ module wt_top (
     // DAC 输出: voice2 查表步锁存 mix_out
     // 用 reg 直接锁存 (与 mix_out 在同一个 always 块内, 避免 delta cycle 竞争)
     // ============================================================
-    reg [7:0] dac_out_r;
+    reg [7:0] dac_out_r = 8'd0;
 
     always @(posedge STEP_CLK) begin
         if (c_out_latch && c_voice == 2'd2)
