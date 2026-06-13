@@ -29,7 +29,7 @@ SPFM 总线 → 373/174/377 (3 IC) → 7134 参数 RAM → 合成器数据通路
 | **合成器核心** | 74HC161 | DIP-16 | 2 | 微步计数器 step[4:0] (级联) |
 | | 74HC283 | DIP-16 | 1 | 4-bit 全加器 (相位累加) |
 | | 74HC174 | DIP-16 | 1 | 累加器锁存 + vol/wave 锁存 |
-| | 74HC273 | DIP-20 | 1 | 混音输出锁存 (dac_out) |
+| | 74HC273 | DIP-20 | 1 | TDM 输出锁存 (dac_out, 3 voice 分时) |
 | | 39SF040 | DIP-32 | 2 | 指令 ROM (8-bit) + 波表 ROM |
 | | IDT7134 | DIP-48 | 1 | 双端口参数 RAM |
 | | CY62256 | DIP-28 | 1 | phase 存储 |
@@ -145,15 +145,18 @@ param_addr = step[2:0]    (0-4=freq nibble, 5=wave, 6=vol)
 - 最低音 (step=1): 96000 / 2^20 = **0.091 Hz**
 - 最高音 (step=0xFFFFF): **6000 Hz**
 
-## 混音与输出
+## 混音与输出 (TDM 分时复用, WSG 风格)
 
-查表步依次将 3 通道的 8-bit ROM 值累加:
+不使用数字累加, 改为与 Pac-Man WSG 一致的**分时复用**输出: 3 通道的查表结果在各自 lookup 步直接锁存到 273 输出寄存器, DAC 输出端接 R-2R 电阻网络 + RC 低通滤波器, 模拟域完成混音。
 
-- step 7 (v0 lookup): mix = rom_dq
-- step 15 (v1 lookup): mix = mix + rom_dq
-- step 23 (v2 lookup): mix = mix + rom_dq, 同时锁存 dac_out = mix
+- step 7  (v0 lookup): dac_out <= rom_dq(v0)
+- step 15 (v1 lookup): dac_out <= rom_dq(v1)
+- step 23 (v2 lookup): dac_out <= rom_dq(v2)
+- step 0-6, 8-14, 16-22, 24-31: dac_out 保持上一值
 
-3 路最大 225+225+225=675, 8-bit 截断。dac_out 为无符号 8-bit。
+每采样周期 (32 步) dac_out 切换 3 次, 96kHz 采样率 × 3 = 288kHz 等效刷新率, 高于人听阈, RC 低通即可还原。3 通道独立 0-225, 无混音溢出问题。
+
+硬件优势: 省去数字混音加法器 (原 283 累加), 输出通路更接近 WSG 原版。
 
 ## 仿真说明
 
@@ -164,11 +167,12 @@ param_addr = step[2:0]    (0-4=freq nibble, 5=wave, 6=vol)
 | accum_q[5:0] | 74HC174 | 累加器锁存 (含进位) |
 | phase_mem[0:14] | 74HC62256 | 15 个 4-bit phase nibble (3 voice × 5) |
 | phase_v0/v1/v2 | 62256 内容 | 3×20-bit phase 寄存器 |
-| mix_out[7:0] | 74HC273 | 混音累加器 |
 | cur_vol_r, cur_wave_r | 74HC174 | vol/wave 锁存 |
-| dac_out_r[7:0] | 74HC273 | DAC 输出锁存 |
+| dac_out[7:0] | 74HC273 | DAC 输出锁存 (TDM, 3 voice 分时) |
 
 真实硬件上这些可以直接实例化, 无时序问题。
+
+仿真注意: iverilog 的 delta cycle 机制下, 组合逻辑输出 (ROM DQ, 7134 DO_R) 在 posedge 时还未稳定, 因此 vol/wave/DAC 锁存改用 negedge STEP_CLK。phase_v0/v1/v2 必须初始化为 0 (否则 X 传播)。add_sum/rom_dq 加 X 防护 (`^x === 1'bx ? 0 : x`), 真实硬件不需要。
 
 ## 芯片模型文件
 

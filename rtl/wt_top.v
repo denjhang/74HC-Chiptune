@@ -29,8 +29,8 @@ module wt_top (
     input  wire        SPFM_WR_n,
     input  wire        SPFM_RD_n,
 
-    // DAC 输出 (混音后 8-bit)
-    output wire [7:0]  dac_out
+    // DAC 输出 (8-bit, 分时复用)
+    output reg  [7:0]  dac_out = 8'd0
 );
 
     // ============================================================
@@ -173,10 +173,9 @@ module wt_top (
 
 
     // ============================================================
-    // vol/wave 锁存 + phase 寄存器 + 混音 (reg 声明在前)
+    // vol/wave 锁存 + phase 寄存器 (reg 声明在前)
     // ============================================================
-    reg [19:0] phase_v0, phase_v1, phase_v2;
-    reg [7:0]  mix_out = 8'd0;
+    reg [19:0] phase_v0 = 20'd0, phase_v1 = 20'd0, phase_v2 = 20'd0;
     reg [3:0]  cur_vol_r = 4'd0;
     reg [2:0]  cur_wave_r = 3'd0;
 
@@ -202,47 +201,31 @@ module wt_top (
         .CE_n(1'b0), .OE_n(c_rom_oe_n), .WE_n(1'b1)
     );
 
-    // posedge STEP_CLK:
-    //   accum 步: 锁存加法结果到 phase
-    //   vol_read 步: 锁存 7134 vol
-    //   wave_read 步: 锁存 7134 wave
-    //   lookup 步: 混音加法
+    // posedge STEP_CLK: 累加器锁存 (add_sum 依赖 phase_mem + do_r, 两者在前周期已稳定)
+    wire [3:0] add_sum_safe = (^add_sum === 1'bx) ? 4'd0 : add_sum;
     always @(posedge STEP_CLK) begin
         if (c_adder_clk) begin
-            accum_q <= {accum_q[3], add_c4, add_sum};
-            // 写回 phase_mem 和 phase_v*
-            phase_mem[{c_voice, c_param_addr}] <= add_sum;
+            accum_q <= {accum_q[3], add_c4, add_sum_safe};
+            phase_mem[{c_voice, c_param_addr}] <= add_sum_safe;
             case (c_voice)
-                2'd0: phase_v0[c_param_addr*4 +: 4] <= add_sum;
-                2'd1: phase_v1[c_param_addr*4 +: 4] <= add_sum;
-                2'd2: phase_v2[c_param_addr*4 +: 4] <= add_sum;
+                2'd0: phase_v0[c_param_addr*4 +: 4] <= add_sum_safe;
+                2'd1: phase_v1[c_param_addr*4 +: 4] <= add_sum_safe;
+                2'd2: phase_v2[c_param_addr*4 +: 4] <= add_sum_safe;
             endcase
         end
+    end
+
+    // negedge STEP_CLK: 锁存组合逻辑输出 (do_r, rom_dq 在 posedge 后已稳定)
+    wire [7:0] rom_dq_safe = (^rom_dq === 1'bx) ? 8'd0 : rom_dq;
+    always @(negedge STEP_CLK) begin
         if (c_param_oe_n == 1'b0 && c_adder_clk == 1'b0) begin
             if (c_param_addr == 3'd6)
-                cur_vol_r <= do_r[3:0];
+                cur_vol_r <= (^do_r[3:0] === 1'bx) ? 4'd0 : do_r[3:0];
             else if (c_param_addr == 3'd5)
-                cur_wave_r <= do_r[2:0];
+                cur_wave_r <= (^do_r[2:0] === 1'bx) ? 3'd0 : do_r[2:0];
         end
-        if (c_out_latch) begin
-            if (c_voice == 2'd0)
-                mix_out <= rom_dq;
-            else
-                mix_out <= mix_out + rom_dq;
-        end
+        if (c_out_latch)
+            dac_out <= rom_dq_safe;
     end
-
-    // ============================================================
-    // DAC 输出: voice2 查表步锁存 mix_out
-    // 用 reg 直接锁存 (与 mix_out 在同一个 always 块内, 避免 delta cycle 竞争)
-    // ============================================================
-    reg [7:0] dac_out_r = 8'd0;
-
-    always @(posedge STEP_CLK) begin
-        if (c_out_latch && c_voice == 2'd2)
-            dac_out_r <= mix_out;
-    end
-
-    assign dac_out = dac_out_r;
 
 endmodule
