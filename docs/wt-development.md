@@ -395,6 +395,80 @@ wt_rtl.v 是 wt_ram.v 的 74HC 门级映射版本，微程序逻辑与 wt_ram.v 
 | C major chord (sine C4+E4+G4) | DFT: 262, 329, 392 Hz | DFT: 262, 329, 392 Hz |
 | 5000 样本逐样本对比 | 基准 | **0 差异 (bit-perfect)** |
 
+## 硬件时序分析 (39SF040 + 62256)
+
+### SRAM (CY62256N) 读时序
+
+**RTL 模式**: Step N posedge clk 设置 `ram_addr_r` (74377 锁存)，Step N+1 posedge clk 读取 `ram_io`。
+
+**关键路径**: 74377 tpd (~25ns) + SRAM tAA (55/70ns) + 目标寄存器 setup (~5ns) = **85ns (commercial) / 100ns (industrial)**
+
+| 参数 | 商业级 (0-70°C) | 工业级 (-40~85°C) | 时钟周期 |
+|------|:---:|:---:|:---:|
+| SRAM tAA | 55ns | 70ns | 100ns |
+| 74377 tpd | ~25ns | ~25ns | — |
+| 目标 setup | ~5ns | ~5ns | — |
+| **总需求** | **~85ns** | **~100ns** | 100ns |
+| **裕量** | **~15ns** | **~0ns** | — |
+
+**结论**: 商业级 OK（15ns 裕量）；工业级零裕量，**不可靠**。
+
+### SRAM (CY62256N) 写时序
+
+**RTL 模式**: 写步骤同时设置 addr/data/WE#，下一 posedge clk 恢复默认。WE# 脉宽 = 1 clock = 100ns。
+
+| 参数 | 最小值 | 实际值 | 裕量 |
+|------|:---:|:---:|:---:|
+| tPWE (WE# 脉宽) | 40/50ns | 100ns | 2× |
+| tAW (addr setup to WE# ↑) | 45/60ns | 100ns | ~2× |
+| tSD (data setup to WE# ↑) | 25/30ns | ~60ns | 2× |
+| tHA (addr hold after WE# ↑) | 0ns | ~0ns | OK |
+
+**结论**: 写时序充裕，无问题。
+
+### ROM (SST39SF040) 读时序
+
+**RTL 模式**: Step 10 posedge clk 设置 `rom_addr_r` (74377)，Step 11 posedge clk 读取 `rom_data`。与 SRAM 读路径相同。
+
+| 参数 | 商业级 | 工业级 | 裕量 |
+|------|:---:|:---:|:---:|
+| ROM tAA | 55ns | 70ns | — |
+| 74377 tpd | ~25ns | ~25ns | — |
+| 目标 setup | ~5ns | ~5ns | — |
+| **总需求** | **~85ns** | **~100ns** | — |
+| **裕量** | **~15ns** | **~0ns** | — |
+
+**建议**: OE# 硬接线到 GND（常低），消除 tOEA 延迟。
+
+### 总线负载分析
+
+| 总线 | 负载电容 | 74HC 驱动能力 | 结论 |
+|------|:---:|:---:|:---:|
+| RAM 数据 (ram_io) | SRAM 6pF + 74377 10pF + 74157 10pF ≈ 26pF | IOH -4mA @ 50pF | OK |
+| RAM 地址 (A0-A14) | SRAM 6pF + 74377 10pF ≈ 16pF/引脚 | IOH -4mA | OK |
+| ROM 地址 (A0-A18) | Flash 12pF + 74377 10pF ≈ 22pF/引脚 | IOH -4mA | OK |
+| ROM 数据 (DQ0-DQ7) | Flash 12pF + 寄存器输入 ≈ 14pF | IOH -4mA | OK |
+
+### 安全工作频率
+
+| 配置 | 时钟频率 | 读裕量 | 可靠性 |
+|------|:---:|:---:|:---:|
+| 商业级 (55ns) | 10 MHz | ~15ns | OK |
+| 商业级 (55ns) | 12 MHz | ~-5ns | 不可行 |
+| 工业级 (70ns) | 10 MHz | ~0ns | **不可靠** |
+| 工业级 (70ns) | 8 MHz | ~25ns | OK |
+| 工业级 (70ns) | 6 MHz | ~42ns | 充裕 |
+
+**推荐**: 10MHz + 商业级芯片，或 8MHz + 工业级芯片。
+
+### 硬件设计建议
+
+1. **ROM OE# 接 GND** — 消除 tOEA，节省 ~5ns
+2. **ROM WE# 接 VDD (10kΩ 上拉)** — 防止意外写入
+3. **上电延迟 100µs** — SST39SF040 要求 VDD 稳定 100µs 后再访问
+4. **SRAM OE# 由译码器控制** — 微程序空闲期 OE# 拉高，降低功耗
+5. **去耦电容** — 每片 IC VDD 旁 100nF 陶瓷电容，39SF040 加 10µF 钽电容
+
 ## 文件清单
 
 | 文件 | 说明 |
@@ -410,6 +484,8 @@ wt_rtl.v 是 wt_ram.v 的 74HC 门级映射版本，微程序逻辑与 wt_ram.v 
 | `rom/wt_39sf040.hex` | 512KB ROM hex（6 波形 × 128 点 × 16 level × 32 vol） |
 | `rom/wt_39sf040.bin` | 512KB ROM 二进制（烧录用） |
 | `csv_to_wav.py` | CSV → WAV 转换（32051Hz, 8-bit signed） |
+| `reference/sst39sf040.docx` | SST39SF040 512KB Flash ROM datasheet |
+| `reference/infineon-cy62256n-256-kbit-32-k-8-static-ram-datasheet-en.docx` | CY62256N 32KB SRAM datasheet |
 
 ## 参考项目
 

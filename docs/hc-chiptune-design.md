@@ -1,175 +1,177 @@
-# 74HC-Chiptune 从零设计记录
+# 74HC-Chiptune 设计文档
 
-从零设计，使用 74HC 芯片构建 WT 合成器。参考 YM2413 (IKAOPLL) 总线时序，但不复制任何具体实现。
+基于 Pac-Man WSG 架构，使用 74HC TTL 芯片构建 3 通道波形合成器。
 
-## 项目概述
+## 架构概览
 
-4 通道 WT 合成器，SPFM 总线接口，74HC TTL 芯片实现。
+```
+SPFM 总线 → 373/174/377 (3 IC) → 7134 参数 RAM → 合成器数据通路
+                                                        ↓
+3.072MHz / 32 = 96kHz                                  hc161×2 → 指令 ROM (39SF040)
+32 步循环: v0(8步) + v1(8步) + v2(8步) + NOP(8步)       ↓
+每通道: 5累加 + vol读 + wave读 + ROM查表 = 8步
+混音: 软件加法, 3通道 8-bit 值累加到 273 输出
+```
 
-### 目标芯片清单
+## 时钟
 
-| 部分 | 芯片 | 数量 | 状态 |
+- 晶振: **3.072 MHz** (直接驱动 STEP_CLK)
+- STEP_CLK → hc161×2 CP → 32 步循环 (5-bit step counter)
+- 96kHz = 3.072MHz / 32 (step 跑一轮 = 一个采样周期)
+
+## 芯片清单 (10 IC)
+
+| 部分 | 芯片 | 数量 | 说明 |
 |------|------|------|------|
-| **SPFM 总线接口** | | **3** | **完成** |
-| | 74HC373 | 1 | D[7:0] 透明锁存 |
-| | 74HC174 | 1 | 两路同步器 (2×3 D-FF) |
-| | 74HC377 | 1 | 地址寄存器 (8-bit) |
-| **合成器核心** | | **9** | 设计中 |
-| | 74HC161 | 1 | 微程序步进计数器 |
-| | 74HC283 | 2 | 16-bit 相位累加器 |
-| | 74HC377 | 2 | 地址锁存 + 数据锁存 |
-| | 74HC157 | 1 | 地址 MUX (RAM/ROM) |
-| | 74HC138 + 74HC04 | 2 | 控制信号译码 |
-| | 39SF040 | 1 | 512KB Flash 波形查找表 |
-| | 62256 | 1 | 32KB SRAM 通道寄存器 |
-| **总计** | | **12** | |
+| **SPFM 总线接口** | 74HC373 | 1 | D[7:0] 透明锁存 |
+| | 74HC174 | 1 | 两路同步器 |
+| | 74HC377 | 1 | 地址寄存器 |
+| **合成器核心** | 74HC161 | 2 | 微步计数器 step[4:0] (级联) |
+| | 74HC283 | 1 | 4-bit 全加器 (相位累加) |
+| | 74HC174 | 1 | 累加器锁存 + vol/wave 锁存 |
+| | 74HC273 | 1 | 混音输出锁存 (dac_out) |
+| | 39SF040 | 3 | 指令 ROM (2片) + 波表 ROM |
+| | 7134 | 1 | 双端口参数 RAM |
+| | 62256 | 1 | phase 存储 |
+| **总计** | | **10** | |
 
-## SPFM 总线规格
+## 32 步循环
 
-### 信号定义
+```
+step  0: v0 清零加法器 + nibble 0 累加
+step  1: v0 nibble 1 累加
+step  2: v0 nibble 2 累加
+step  3: v0 nibble 3 累加
+step  4: v0 nibble 4 累加
+step  5: v0 读 vol (7134 addr voice×8+6)
+step  6: v0 读 wave (7134 addr voice×8+5)
+step  7: v0 ROM 查表 → 混音锁存
 
-| 信号 | 方向 | 说明 |
+step  8-15: v1 同上
+step 16-23: v2 同上 (查表后同时锁存 dac_out)
+step 24-31: NOP (0x6FFF)
+```
+
+## 指令 ROM 控制字格式 (16-bit)
+
+每步 16-bit, 存在 39SF040 指令 ROM (2片拼 16-bit), 地址 = step × 2
+
+| Bit | 名称 | 说明 |
+|-----|------|------|
+| 15 | adder_clk | 1=上升沿锁存 283 加法结果 |
+| 13 | adder_clr_n | 0=清零加法器 (每通道第一步) |
+| 12 | out_latch | 1=查表步, 锁存 ROM 输出到 mix |
+| 11 | param_oe_n | 0=读 7134 参数 |
+| 10 | ram_oe_n | 0=读 62256 phase |
+| 9 | rom_oe_n | 0=读波表 ROM |
+| 7:4 | param_addr | 7134 子地址: 0-4=freq, 5=wave, 6=vol |
+| 3:0 | voice_sel | 当前通道 (0/1/2) |
+
+## 波表 ROM (128 点)
+
+地址 = {wave[2:0], vol[3:0], phase[19:12]} (15-bit, 零扩展到 19-bit)
+
+- 8 种波形 × 16 音量 × 256 索引 = 32768 字节 (32KB)
+- 波形 128 点, 4-bit 无符号 (0-15), 预计算 wave[sample] × vol = 8-bit (0-225)
+- phase[19:12] 为 8-bit, 超过 128 的索引自动循环 (idx % 128)
+- 存在第三片 39SF040
+
+### 波形列表
+
+| 索引 | 名称 | 说明 |
 |------|------|------|
-| D[7:0] | 双向 | 数据总线 |
-| A0 | 输入 | 0=写地址，1=写数据 |
-| /CS | 输入 | 片选（低有效） |
-| /WR | 输入 | 写选通（低有效） |
-| /RD | 输入 | 读选通（低有效） |
-| /RST | 输入 | 复位（低有效） |
-| CLK | 输入 | 系统时钟 10 MHz |
+| 0 | sine | 正弦波 |
+| 1 | square | 方波 (50%) |
+| 2 | sq12 | 窄方波 (12.5%) |
+| 3 | sq25 | 窄方波 (25%) |
+| 4 | saw | 锯齿波 |
+| 5 | triangle | 三角波 |
+| 6 | noise | 伪随机噪声 |
+| 7 | sine2x | 二倍频正弦 |
 
-### 寄存器映射
+## 参数 RAM (7134) 地址映射
 
-| 地址 | 名称 | 位宽 | 说明 |
-|------|------|------|------|
-| 0x00 | CTRL | [1:0] | 通道选择 |
-| 0x01 | wave_idx | [2:0] | 波形选择 (0-5) |
-| 0x02 | vol | [4:0] | 音量 (0-31) |
-| 0x03 | env_rate | [7:0] | 包络速率 |
-| 0x04 | step_lo | [7:0] | 频率步进低字节 |
-| 0x05 | step_hi | [7:0] | 频率步进高字节 |
-| 0x06 | note_on | - | 写触发（读回通道活跃状态） |
-| 0x07 | note_off | - | 写触发 |
+| 地址 | 字段 | 说明 |
+|------|------|------|
+| voice×8 + 0..4 | freq nibble 0..4 | 频率步进 (每 nibble 4-bit, 低地址低位) |
+| voice×8 + 5 | wave_idx | 波形选择 (低 3 bit) |
+| voice×8 + 6 | vol | 音量 (低 4 bit, 0=静音, 15=最大) |
 
-### 写时序
+Right 端口地址 = {7'b0, voice[3:0], 3'b0} + {8'b0, param_addr[3:0]}
 
-YM2413 风格，两步写：
+## Phase RAM (62256) 地址映射
 
-1. **地址写**：A0=0, /CS=0, /WR=0, D=寄存器地址（保持 ≥3 个时钟）
-2. **数据写**：A0=1, /CS=0, /WR=0, D=数据（保持 ≥3 个时钟）
-3. 地址/数据间隔：≥4 个时钟（推荐 ≥10 clocks = 1µs）
+| 地址 | 字段 | 说明 |
+|------|------|------|
+| voice×5 + 0..4 | phase nibble 0..4 | 累加器相位 (硬件读写, CPU 不访问) |
 
-## SPFM 总线接口 (wt_spfm_bus.v)
+## 频率计算
 
-### 同步链设计
+`step = freq × 2^20 / 96000`
 
-参考 IKAOPLL `rw_synchronizer`，适配单时钟 10MHz：
+| 音符 | 频率 | step (20-bit) |
+|------|------|---------------|
+| C4 | 261.63 | 0x0B2A |
+| D4 | 293.66 | 0x0C88 |
+| E4 | 329.63 | 0x0E14 |
+| F4 | 349.23 | 0x0EE7 |
+| G4 | 392.00 | 0x10BA |
+| A4 | 440.00 | 0x12C6 |
+| B4 | 493.88 | 0x1513 |
+| C5 | 523.25 | 0x1653 |
 
-```
-主机 D[7:0]  → 74HC373 透明锁存 → d_latched
-主机 CS/WR/A0 → 组合逻辑 → addr_req / data_req
-    → 2级 D-FF 同步器 (消除亚稳态)
-    → 上升沿检测 → 1-clock 写脉冲 (addr_wr / data_wr)
-```
+## 音域
 
-### 与 IKAOPLL 的区别
+- 最低音 (step=1): 96000 / 2^20 = **0.091 Hz**
+- 最高音 (step=0xFFFFF): **2963 Hz**
 
-| 项目 | IKAOPLL (YM2413) | 本设计 |
-|------|------------------|--------|
-| 时钟 | 3 相 (phiM/phi1/phi1n) | 单时钟 10MHz |
-| 脉冲产生 | SR 锁存 + 3 相移位 | 2 级同步 + 边沿检测 |
-| 数据锁存 | dlatch (行为级) | 74HC373 (实际芯片) |
-| 脉冲宽度 | 1 phase | 1 clock |
+## 混音与输出
 
-### 硬件连接 (芯片实例化)
+查表步依次将 3 通道的 8-bit ROM 值累加:
 
-```
-U1: 74HC373 — 透明锁存 D[7:0]
-  .LE  = ~CS_n & ~WR_n & RST_n
-  .D   = D[7:0]
-  .Q   = d_latched
+- step 7 (v0 lookup): mix = rom_dq
+- step 15 (v1 lookup): mix = mix + rom_dq
+- step 23 (v2 lookup): mix = mix + rom_dq, 同时锁存 dac_out = mix
 
-U2: 74HC174 — 两路同步器 (6 D-FF)
-  .CLK  = CLK
-  .nCLR = RST_n
-  .D[0] = addr_req = ~CS_n & ~WR_n & ~A0
-  .D[1] = Q[0]  (addr_sync0 → 第2级)
-  .D[2] = Q[1]  (addr_sync1 → 边沿检测延迟)
-  .D[3] = data_req = ~CS_n & ~WR_n & A0
-  .D[4] = Q[3]  (data_sync0 → 第2级)
-  .D[5] = Q[4]  (data_sync1 → 边沿检测延迟)
-  addr_wr = Q[1] & ~Q[2]  (上升沿 → 1-clock 脉冲)
-  data_wr = Q[4] & ~Q[5]
+3 路最大 225+225+225=675, 8-bit 截断。dac_out 为无符号 8-bit。
 
-U3: 74HC377 — 地址寄存器
-  .Enable_bar = ~addr_wr
-  .D          = d_latched
-  .Clk        = CLK
-  .Q          = reg_addr
+## 仿真说明
 
-reg_data = d_latched  (透传，下游在 data_wr 时采样)
-```
+仿真中以下模块用 reg 实现 (避免跨实例 NBA 时序竞争):
 
-### 验证结果（2026-06-13）
+| reg | 对应硬件 | 说明 |
+|-----|---------|------|
+| accum_q[5:0] | 74HC174 | 累加器锁存 (含进位) |
+| phase_mem[0:19] | 74HC62256 | 20 个 4-bit phase nibble |
+| phase_v0/v1/v2 | 62256 内容 | 3×20-bit phase 寄存器 |
+| mix_out[7:0] | 74HC273 | 混音累加器 |
+| cur_vol_r, cur_wave_r | 74HC174 | vol/wave 锁存 |
+| dac_out_r[7:0] | 74HC273 | DAC 输出锁存 |
 
-全部芯片实例化，15 次写入全部正确。
+真实硬件上这些可以直接实例化, 无时序问题。
 
-| 测试项 | 结果 |
-|--------|------|
-| CTRL (0x00, 0x02) | PASS |
-| step_lo (0x04, 0x67) | PASS |
-| step_hi (0x05, 0x00) | PASS |
-| note_on (0x06, 0x01) | PASS |
-| 10 次连续写入 | PASS |
-| 复位 (RST_n → 174 nCLR) | PASS |
+## 芯片模型文件
 
-### iverilog 仿真注意事项
+| 文件 | 芯片 | 来源 |
+|------|------|------|
+| rtl/hc7134.v | IDT7134 双端口 SRAM | 自建 |
+| rtl/hc62256.v | CY62256N SRAM | 自建 |
+| rtl/hc39sf040.v | SST39SF040A Flash ROM | 自建 |
+| rtl/hc283.v | 74HC283 4-bit 全加器 | 自建 |
+| rtl/hc174.v | 74HC174 六D触发器 | 自建 |
+| rtl/hc161.v | 74HC161 4-bit 计数器 | 自建 |
+| rtl/hc273.v | 74HC273 八D触发器 | ice-chips 库 |
 
-1. **透明锁存不能驱动 `zz`**: `always @(*) if(LE) latch = D` 在 D 变化时重新评估，testbench 中保持最后写入值
-2. **negedge 驱动**: testbench 用 `@(negedge CLK)` 驱动总线信号，避免 posedge 竞争
-3. **SR 锁存组合环**: IKAOPLL 的 SR 锁存 + 3 相时钟在单时钟下产生多 clock 脉冲，改用边沿检测
+## ROM 文件
 
-## RAM 寄存器映射 (62256)
+| 文件 | 用途 | 大小 |
+|------|------|------|
+| rom/rom_instruction.hex | 指令 ROM (gen_rom.py 生成) | 512KB |
+| rom/rom_wavetable.hex | 波表 ROM (gen_rom.py 生成, 32KB 有效) | 512KB |
+| rom/gen_rom.py | ROM 生成脚本 | - |
 
-每通道 16 字节, 4通道 = 64 字节 (62256 有 32KB)
+## 参考
 
-| 地址 | 字段 | 位宽 | 说明 |
-|------|------|------|------|
-| ch×16+0 | phase_lo | 8 | 相位低字节 |
-| ch×16+1 | phase_hi | 8 | 相位高字节 |
-| ch×16+2 | step_lo | 8 | 频率步进低字节 |
-| ch×16+3 | step_hi | 8 | 频率步进高字节 |
-| ch×16+4 | level | 4 | 包络电平 0-15 |
-| ch×16+5 | env_state | 3 | 包络状态 (0=off, 1=atk, 2=sus, 3=rel) |
-| ch×16+6 | env_cnt | 8 | 包络计数器 |
-| ch×16+7 | vol | 5 | 音量 0-31 |
-| ch×16+8 | dac_out | 8 | DAC 输出 |
-| ch×16+9 | wave_idx | 3 | 波形选择 0-5 |
-| ch×16+10 | env_rate | 8 | 包络速率 |
-
-## 频率参数
-
-```
-step = freq × 8192 / sample_rate
-sample_rate = 32051 Hz (10MHz / 312 clocks/sample)
-
-常用音符:
-C4 (261.6Hz) → step = 67
-A4 (440.0Hz) → step = 112
-```
-
-## 文件清单
-
-| 文件 | 说明 |
-|------|------|
-| `rtl/wt_spfm_bus.v` | SPFM 总线接口 (74HC 实例化, 3 IC) |
-| `tb/wt_spfm_bus_tb.v` | SPFM 总线测试台 |
-| `rtl/wt_ram.v` | 行为级 RAM 架构 (9 IC 方案算法验证) |
-| `rtl/wt_rtl.v` | 74HC 门级映射版本 (bit-perfect vs wt_ram) |
-| `rom/wt_39sf040.hex` | 512KB 波形 ROM |
-
-## 参考项目
-
-- IKAOPLL (YM2413): `reference/IKAOPLL-main/` — 总线同步链参考
-- STC32G 移植版: `D:\working\vscode-projects\STC_Chiptune\STC32G12K128\wt.c` — 频率参数和算法权威参考
-- Gigatron TTL: http://gigatron.io/ — 查表 MCU 架构灵感
+- Pac-Man 技术文档: `reference/Namco WSG/Pac-Man技术文档_extracted/`
+- Pac-Man Emulation Guide: `reference/Namco WSG/PacmanEmulation_extracted/`
+- STC32G WT 合成: `D:\working\vscode-projects\STC_Chiptune\STC32G12K128\wt.c`

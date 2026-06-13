@@ -1,98 +1,129 @@
+// wt_top_tb.v — wt_top 顶层模块测试
+// 3.072MHz → 32 步 → 96kHz 采样率 (与 WSG 原版一致)
+
 `timescale 1ns/1ps
 
 module wt_top_tb;
 
-reg         clk;
-reg   [7:0] addr;
-reg   [7:0] data_in;
-wire  [7:0] data;
-reg         cs_n;
-reg         wr_n;
-reg         rd_n;
-reg         rst_n;
-wire  [7:0] dac_out;
+    reg  STEP_CLK;
+    reg  SPFM_CLK;
+    reg  SPFM_RST_n;
+    reg  [7:0] SPFM_D;
+    reg  SPFM_A0;
+    reg  SPFM_CS_n;
+    reg  SPFM_WR_n;
+    reg  SPFM_RD_n;
 
-assign data = (~wr_n) ? data_in : 8'bz;
+    wire [7:0] dac_out;
 
-wt_top dut (
-    .clk(clk),
-    .addr(addr),
-    .data(data),
-    .cs_n(cs_n),
-    .wr_n(wr_n),
-    .rd_n(rd_n),
-    .rst_n(rst_n),
-    .dac_out(dac_out)
-);
+    wt_top u_dut (
+        .STEP_CLK(STEP_CLK),
+        .SPFM_CLK(SPFM_CLK),
+        .SPFM_RST_n(SPFM_RST_n),
+        .SPFM_D(SPFM_D),
+        .SPFM_A0(SPFM_A0),
+        .SPFM_CS_n(SPFM_CS_n),
+        .SPFM_WR_n(SPFM_WR_n),
+        .SPFM_RD_n(SPFM_RD_n),
+        .dac_out(dac_out)
+    );
 
-initial clk = 0;
-always #50 clk = ~clk;
+    // STEP_CLK: 3.072MHz → 周期 ~325.5ns
+    initial STEP_CLK = 0;
+    always #162.75 STEP_CLK = ~STEP_CLK;
 
-task bus_write;
-    input [7:0] a;
-    input [7:0] d;
-    begin
-        @(posedge clk);
-        addr = a; data_in = d; cs_n = 0; wr_n = 0;
-        @(posedge clk);
-        wr_n = 1; cs_n = 1;
+    // SPFM_CLK: 8MHz → 周期 125ns
+    initial SPFM_CLK = 0;
+    always #62.5 SPFM_CLK = ~SPFM_CLK;
+
+    task spfm_write;
+        input [7:0] addr;
+        input [7:0] data;
+        begin
+            SPFM_RST_n = 1; SPFM_CS_n = 0; SPFM_WR_n = 0;
+            SPFM_A0 = 0; SPFM_D = addr;
+            #2000;
+            SPFM_CS_n = 1; SPFM_WR_n = 1;
+            #2000;
+            SPFM_CS_n = 0; SPFM_WR_n = 0;
+            SPFM_A0 = 1; SPFM_D = data;
+            #2000;
+            SPFM_CS_n = 1; SPFM_WR_n = 1;
+            #2000;
+        end
+    endtask
+
+    task write_voice;
+        input [3:0] voice;
+        input [19:0] freq;
+        input [2:0]  wave;
+        input [3:0]  vol;
+        integer i;
+        reg [7:0] base;
+        begin
+            base = voice * 8;
+            for (i = 0; i < 5; i = i + 1)
+                spfm_write(base + i, freq[i*4 +: 4]);
+            spfm_write(base + 5, {5'b0, wave});
+            spfm_write(base + 6, {4'b0, vol});
+        end
+    endtask
+
+    integer f_csv;
+    integer sample_count;
+
+    task wait_sample;
+        integer i;
+        begin
+            for (i = 0; i < 32; i = i + 1)
+                @(posedge STEP_CLK);
+        end
+    endtask
+
+    initial begin
+        SPFM_RST_n = 0; SPFM_CS_n = 1; SPFM_WR_n = 1;
+        SPFM_RD_n = 1; SPFM_A0 = 0; SPFM_D = 8'h00;
+
+        #5000;
+        SPFM_RST_n = 1;
+        #5000;
+
+        $display("=== wt_top Testbench ===");
+
+        // 96kHz 采样率: step = freq * 2^20 / 96000
+        // A4 440Hz → step = 4806 = 0x12C6
+        // C5 523Hz → step = 5713 = 0x1651
+        // E4 330Hz → step = 3604 = 0x0E14
+
+        // 96kHz 采样率: step = freq * 2^20 / 96000
+        // A4 440Hz → step = 4806 = 0x12C6
+        // C5 523Hz → step = 5713 = 0x1651
+        // E4 330Hz → step = 3604 = 0x0E14
+
+        write_voice(4'd0, 20'h12C6, 3'd0, 4'd15);  // A4 sine vol=15, 单通道
+        write_voice(4'd1, 20'h0000, 3'd0, 4'd0);
+        write_voice(4'd2, 20'h0000, 3'd0, 4'd0);
+
+        // 等几个 cycle 让 phase 稳定
+        repeat (100) wait_sample();
+
+        f_csv = $fopen("wt_top_output.csv", "w");
+        $fwrite(f_csv, "sample,dac\n");
+        $display("--- Collecting 5000 samples ---");
+
+        for (sample_count = 0; sample_count < 5000; sample_count = sample_count + 1) begin
+            wait_sample();
+            $fwrite(f_csv, "%0d,%0d\n", sample_count, dac_out);
+        end
+
+        $fclose(f_csv);
+        $display("--- Done ---");
+        $finish;
     end
-endtask
 
-integer fd, i;
-
-initial begin
-    fd = $fopen("wt_output.csv", "w");
-    $fdisplay(fd, "sample,dac_signed");
-
-    addr = 0; data_in = 0; cs_n = 1; wr_n = 1; rd_n = 1;
-    rst_n = 0;
-    #500;
-    rst_n = 1;
-    #200;
-
-    // ch0: C4 (261Hz), atk_rate=64
-    bus_write(8'h01, 8'h86);
-    bus_write(8'h02, 8'h00);
-    bus_write(8'h03, 8'h40);  // atk_rate = 64
-
-    // ch1: E4 (330Hz), atk_rate=64
-    bus_write(8'h04, 8'hA9);
-    bus_write(8'h05, 8'h00);
-    bus_write(8'h06, 8'h40);
-
-    // ch0 note_on + start
-    bus_write(8'h00, 8'h03);
-
-    // 采样 64000 次 ≈ 2秒
-    for (i = 0; i < 64000; i = i + 1) begin
-        repeat (312) @(posedge clk);
-        $fdisplay(fd, "%0d,%0d", i, $signed(dac_out));
+    initial begin
+        $dumpfile("wt_top_tb.vcd");
+        $dumpvars(0, wt_top_tb);
     end
-
-    // ch0 note_off
-    bus_write(8'h00, 8'h05);
-
-    // 再采 32000 ≈ 1秒 (release)
-    for (i = 0; i < 32000; i = i + 1) begin
-        repeat (312) @(posedge clk);
-        $fdisplay(fd, "%0d,%0d", i + 64000, $signed(dac_out));
-    end
-
-    // 改频率到 A4 (440Hz) step=0x00E1
-    bus_write(8'h01, 8'hE1);
-    bus_write(8'h02, 8'h00);
-    // ch0 note_on again
-    bus_write(8'h00, 8'h03);
-
-    for (i = 0; i < 32000; i = i + 1) begin
-        repeat (312) @(posedge clk);
-        $fdisplay(fd, "%0d,%0d", i + 96000, $signed(dac_out));
-    end
-
-    $fclose(fd);
-    $display("Done. 128000 samples in wt_output.csv");
-    $finish;
-end
 
 endmodule

@@ -17,7 +17,7 @@
 // 74HC373 — 八D透明锁存
 // LE=1: Q 跟随 D (透明)
 // LE=0: Q 锁存
-module hc373 (
+module spfm_373 (
     input         LE,
     input  [7:0]  D,
     output [7:0]  Q
@@ -32,7 +32,7 @@ endmodule
 // 74HC174 — 六D触发器 (上升沿, 异步清零)
 // posedge CLK: Q <= D
 // nCLR=0: Q <= 0 (异步)
-module hc174 (
+module spfm_174 (
     input         CLK,
     input         nCLR,
     input  [5:0]  D,
@@ -48,7 +48,7 @@ endmodule
 // 74HC377 — 八D触发器 (上升沿, 使能)
 // Enable_bar=0 且 posedge Clk: Q <= D
 // Enable_bar=1: Q 保持
-module hc377 (
+module spfm_377 (
     input             Enable_bar,
     input      [7:0]  D,
     input             Clk,
@@ -102,7 +102,7 @@ module wt_spfm_bus (
     wire le = ~CS_n & ~WR_n & RST_n;
 
     wire [7:0] d_latched;
-    hc373 U1 (
+    spfm_373 U1 (
         .LE (le),
         .D  (D),
         .Q  (d_latched)
@@ -135,7 +135,7 @@ module wt_spfm_bus (
     assign u2_d[4] = u2_q[3];
     assign u2_d[5] = u2_q[4];
 
-    hc174 U2 (
+    spfm_174 U2 (
         .CLK  (CLK),
         .nCLR (RST_n),
         .D    (u2_d),
@@ -151,7 +151,7 @@ module wt_spfm_bus (
     // addr_wr=1 时 Enable_bar=0 → posedge CLK 锁存 d_latched
     // ============================================================
     wire [7:0] reg_addr_w;
-    hc377 U3 (
+    spfm_377 U3 (
         .Enable_bar (~addr_wr),
         .D          (d_latched),
         .Clk        (CLK),
