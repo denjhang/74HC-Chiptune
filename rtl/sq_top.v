@@ -38,38 +38,38 @@ module sq_top (
 
     // ============================================================
     // SPFM 总线接口 (3 IC, 实现在 wt_spfm_bus.v)
+    //   输出: addr_wr_n / data_wr_n (active-low, 直接来自译码 ROM)
     // ============================================================
     wire [7:0] reg_addr;
     wire [7:0] reg_data;
-    wire       addr_wr;
-    wire       data_wr;
+    wire       addr_wr_n;
+    wire       data_wr_n;
+    wire       le_unused;
 
     wt_spfm_bus u_spfm (
         .CLK(SPFM_CLK), .RST_n(SPFM_RST_n),
         .D(SPFM_D), .A0(SPFM_A0),
         .CS_n(SPFM_CS_n), .WR_n(SPFM_WR_n), .RD_n(SPFM_RD_n),
         .reg_addr(reg_addr), .reg_data(reg_data),
-        .addr_wr(addr_wr), .data_wr(data_wr)
+        .addr_wr_n(addr_wr_n), .data_wr_n(data_wr_n),
+        .le(le_unused)
     );
 
     // ============================================================
     // hc377 × 2: 频率字寄存器 (2 IC)
-    //   data_wr 上升沿 + reg_addr 选择低/高字节
-    //   Enable_bar = ~(data_wr & ~reg_addr[0])  → 低字节
-    //   Enable_bar = ~(data_wr &  reg_addr[0])  → 高字节
-    //   = ~data_wr | reg_addr[0]_or_n~addr[0]
+    //   data_wr_n=0 (写数据激活) + reg_addr[0] 选择低/高字节
+    //   Enable_bar 为 0 (有效) 当且仅当: data_wr_n=0 且地址匹配
+    //     lo_en_bar = data_wr_n | reg_addr[0]     (data_wr_n=0 且 addr=0 → 0)
+    //     hi_en_bar = data_wr_n | ~reg_addr[0]    (data_wr_n=0 且 addr=1 → 0)
     //
     //   用 hc04 + hc32 译码:
-    //     a0n = ~reg_addr[0]
-    //     lo_en_bar = ~data_wr | reg_addr[0]    (data_wr=1 且 addr=0 时为 0)
-    //     hi_en_bar = ~data_wr | ~reg_addr[0]   (data_wr=1 且 addr=1 时为 0)
-    //   即: lo_en_bar = data_wr_n | addr0
-    //       hi_en_bar = data_wr_n | a0n
+    //     a0n = ~reg_addr[0]              (hc04)
+    //     lo_en_bar = data_wr_n | addr0   (hc32)
+    //     hi_en_bar = data_wr_n | a0n     (hc32)
     // ============================================================
     wire [7:0] freq_lo;
     wire [7:0] freq_hi;
 
-    wire data_wr_n;
     wire a0n;   // ~reg_addr[0]
     wire lo_en_bar;
     wire hi_en_bar;
@@ -91,21 +91,21 @@ module sq_top (
     wire [15:0] freq = {freq_hi, freq_lo};
 
     // ============================================================
-    // hc04: 反相器 (1 IC, 用 3 路)
-    //   A1=tc3       Y1=pe_n     (16位全1时拉低 PE, 重新预置)
-    //   A2=data_wr   Y2=data_wr_n
-    //   A3=reg_addr[0] Y3=a0n
-    //   其余 3 路输入绑 0 (闲置)
+    // hc04: 反相器 (1 IC, 用 2 路)
+    //   A1=tc3          Y1=pe_n     (16位全1时拉低 PE, 重新预置)
+    //   A2=reg_addr[0]  Y2=a0n
+    //   其余 4 路输入绑 0 (闲置)
+    //   (原 A2=data_wr 反相已不需要: data_wr_n 直接来自总线)
     // ============================================================
     wire pe_n;
-    wire _unused_inv4, _unused_inv5, _unused_inv6;
+    wire _unused_inv3, _unused_inv4, _unused_inv5, _unused_inv6;
     wire [3:0] q0, q1, q2, q3;
     wire       tc0, tc1, tc2, tc3;
 
     hc04 u_inv (
         .A1(tc3),         .Y1(pe_n),
-        .A2(data_wr),     .Y2(data_wr_n),
-        .A3(reg_addr[0]), .Y3(a0n),
+        .A2(reg_addr[0]), .Y2(a0n),
+        .A3(1'b0), .Y3(_unused_inv3),
         .A4(1'b0), .Y4(_unused_inv4),
         .A5(1'b0), .Y5(_unused_inv5),
         .A6(1'b0), .Y6(_unused_inv6)

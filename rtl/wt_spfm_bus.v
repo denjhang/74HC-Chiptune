@@ -1,12 +1,25 @@
-// wt_spfm_bus.v — SPFM 总线接口 (74HC 芯片实例化)
+// wt_spfm_bus.v — SPFM 总线接口 (ROM 查表译码, 完全实例化)
+//
+// 用户自定义 SPFM 协议, 仿 YM2413 两步写时序:
+//   写地址: A0=0, CS_n=0, WR_n=0  (RST_n=1)
+//   写数据: A0=1, CS_n=0, WR_n=0  (RST_n=1)
+//   间隙:   CS_n=1 或 WR_n=1
+//
+// 时序要求 (主机软件保证):
+//   - 写脉冲 (CS_n=0, WR_n=0) 持续 ≥ SPFM_CLK × N
+//   - 两次写之间间隔 ≥ SPFM_CLK × M (让 373 锁存稳定)
+//
+// 架构:
+//   U1: 74HC373 — D[7:0] 透明锁存 (le=1 时透明, le=0 时锁存)
+//       LE = ROM 输出 DQ2 (写地址/写数据时 le=1)
+//   U2: 74HC377 — 地址寄存器 (8-bit)
+//       Enable_bar = ROM 输出 DQ0 (addr_wr_n, 写地址时为 0)
+//   U3: 39SF040 — 译码 ROM (替代所有组合逻辑门)
+//       地址 A3..A0 = {CS_n, WR_n, A0, RST_n}
+//       输出 DQ2..DQ0 = {le, data_wr_n, addr_wr_n}
 //
 // 芯片清单 (3 IC):
-//   U1: 74HC373 — D[7:0] 透明锁存
-//   U2: 74HC174 — 两路同步器 (addr + data, 6 D-FF)
-//   U3: 74HC377 — 地址寄存器 (8-bit)
-//
-// 同步链: 异步请求 → 2级 D-FF 同步 → 上升沿检测 → 1-clock 脉冲
-// 写时序: 脉冲 ≥3 clocks, 地址/数据间隔 ≥4 clocks
+//   373 + 377 + 39SF040 (无 174 同步器, 时序由主机保证)
 
 `timescale 1ns/1ps
 
@@ -29,25 +42,7 @@ module spfm_373 (
     assign Q = latch;
 endmodule
 
-// 74HC174 — 六D触发器 (上升沿, 异步清零)
-// posedge CLK: Q <= D
-// nCLR=0: Q <= 0 (异步)
-module spfm_174 (
-    input         CLK,
-    input         nCLR,
-    input  [5:0]  D,
-    output reg [5:0] Q
-);
-    initial Q = 6'd0;
-    always @(posedge CLK or negedge nCLR) begin
-        if (!nCLR) Q <= 6'd0;
-        else       Q <= D;
-    end
-endmodule
-
 // 74HC377 — 八D触发器 (上升沿, 使能)
-// Enable_bar=0 且 posedge Clk: Q <= D
-// Enable_bar=1: Q 保持
 module spfm_377 (
     input             Enable_bar,
     input      [7:0]  D,
@@ -61,105 +56,93 @@ module spfm_377 (
 endmodule
 
 // ================================================================
-// SPFM 总线接口顶层
-//
-// U1: 74HC373 — 透明锁存 D[7:0]
-//     LE  = ~CS_n & ~WR_n & RST_n  (CS=0,WR=0,RST=1 时透明)
-//     D   = D[7:0] (总线)
-//     Q   = d_latched (锁存后数据)
-//
-// U2: 74HC174 — 两路同步器 (6 D-FF)
-//     D[0] = addr_req, D[1] = addr_sync0, D[2] = addr_sync1
-//     D[3] = data_req, D[4] = data_sync0, D[5] = data_sync1
-//     Q    → 2级同步 + 边沿检测
-//
-// U3: 74HC377 — 地址寄存器
-//     Enable_bar = ~addr_wr (addr_wr=1 时使能)
-//     D          = d_latched
-//     Clk        = CLK
-//     Q          = reg_addr
+// SPFM 总线接口顶层 (ROM 查表译码)
 // ================================================================
 module wt_spfm_bus (
-    // SPFM 总线 (来自主机)
+    // SPFM 总线 (来自主机) — 只写, RD_n 预留
     input  wire        CLK,
     input  wire        RST_n,
     input  wire [7:0]  D,
     input  wire        A0,
     input  wire        CS_n,
     input  wire        WR_n,
-    input  wire        RD_n,
+    input  wire        RD_n,    // 预留 (当前未使用)
 
     // 内部寄存器输出
+    //   addr_wr_n / data_wr_n: 直接从 ROM 输出 (active-low), 无隐藏反相
     output wire [7:0]  reg_addr,
     output wire [7:0]  reg_data,
-    output wire        addr_wr,
-    output wire        data_wr
+    output wire        addr_wr_n,
+    output wire        data_wr_n,
+    output wire        le            // 373 透明锁存使能 (诊断用, 一般不接)
 );
 
     // ============================================================
-    // U1: 74HC373 — D[7:0] 透明锁存
+    // U3: 39SF040 — 译码 ROM
+    //   地址 A3..A0 = {CS_n, WR_n, A0, RST_n}
+    //   A4..A18 = 0
+    //   输出:
+    //     DQ2 = le        (373 透明锁存使能)
+    //     DQ1 = data_wr_n (写数据时为 0)
+    //     DQ0 = addr_wr_n (写地址时为 0)
     // ============================================================
-    wire le = ~CS_n & ~WR_n & RST_n;
+    wire [7:0] decode_dq;
 
+    hc39sf040 #(.INIT_FILE("rom/spfm_decode.hex")) u_decode (
+        .A0(RST_n),  .A1(A0),     .A2(WR_n),   .A3(CS_n),
+        .A4(1'b0),   .A5(1'b0),   .A6(1'b0),   .A7(1'b0),
+        .A8(1'b0),   .A9(1'b0),   .A10(1'b0),  .A11(1'b0),
+        .A12(1'b0),  .A13(1'b0),  .A14(1'b0),  .A15(1'b0),
+        .A16(1'b0),  .A17(1'b0),  .A18(1'b0),
+        .DQ(decode_dq),
+        .CE_n(1'b0), .OE_n(1'b0), .WE_n(1'b1)
+    );
+
+    wire le_w        = decode_dq[2];
+    wire data_wr_n_w = decode_dq[1];
+    wire addr_wr_n_w = decode_dq[0];
+
+    // ============================================================
+    // U1: 74HC373 — D[7:0] 透明锁存 (写地址或写数据时透明)
+    // ============================================================
     wire [7:0] d_latched;
+
     spfm_373 U1 (
-        .LE (le),
+        .LE (le_w),
         .D  (D),
         .Q  (d_latched)
     );
 
     // ============================================================
-    // U2: 74HC174 — 两路同步器
-    //
-    // addr 路径: D[0]=addr_req → Q[0]=addr_sync0
-    //            D[1]=addr_sync0 → Q[1]=addr_sync1
-    //            D[2]=addr_sync1 → Q[2]=addr_sync1_d (边沿检测)
-    //
-    // data 路径: D[3]=data_req → Q[3]=data_sync0
-    //            D[4]=data_sync0 → Q[4]=data_sync1
-    //            D[5]=data_sync1 → Q[5]=data_sync1_d
-    // ============================================================
-    wire addr_req = ~CS_n & ~WR_n & ~A0;
-    wire data_req = ~CS_n & ~WR_n &  A0;
-
-    wire [5:0] u2_d;
-    wire [5:0] u2_q;
-
-    // addr 路径反馈: Q → 下一级 D
-    assign u2_d[0] = addr_req;        // 第1级: 采样异步输入
-    assign u2_d[1] = u2_q[0];         // 第2级: 同步
-    assign u2_d[2] = u2_q[1];         // 第3级: 延迟(边沿检测)
-
-    // data 路径反馈
-    assign u2_d[3] = data_req;
-    assign u2_d[4] = u2_q[3];
-    assign u2_d[5] = u2_q[4];
-
-    spfm_174 U2 (
-        .CLK  (CLK),
-        .nCLR (RST_n),
-        .D    (u2_d),
-        .Q    (u2_q)
-    );
-
-    // 上升沿检测: sync1 & ~sync1_d = 1-clock 脉冲
-    assign addr_wr = u2_q[1] & ~u2_q[2];
-    assign data_wr = u2_q[4] & ~u2_q[5];
-
-    // ============================================================
-    // U3: 74HC377 — 地址寄存器
-    // addr_wr=1 时 Enable_bar=0 → posedge CLK 锁存 d_latched
+    // U2: 74HC377 — 地址寄存器
+    //   addr_wr_n=0 时 Enable_bar=0, posedge CLK 锁存 d_latched
     // ============================================================
     wire [7:0] reg_addr_w;
-    spfm_377 U3 (
-        .Enable_bar (~addr_wr),
+
+    spfm_377 U2 (
+        .Enable_bar (addr_wr_n_w),
         .D          (d_latched),
         .Clk        (CLK),
         .Q          (reg_addr_w)
     );
-    assign reg_addr = reg_addr_w;
 
-    // 数据透传 (由下游在 data_wr 时采样)
-    assign reg_data = d_latched;
+    // ============================================================
+    // 输出
+    //   reg_addr:   当前地址 (从 377 读)
+    //   reg_data:   当前数据 (从 373 直通, 写数据时锁存的内容)
+    //   addr_wr_n:  写地址脉冲 (active-low, 直接来自 ROM DQ0, 无隐藏反相)
+    //   data_wr_n:  写数据脉冲 (active-low, 直接来自 ROM DQ1, 无隐藏反相)
+    //   le:         373 锁存使能 (诊断用, 一般不接)
+    //
+    //   全部输出均为 wire 直通 (PCB 导线), 无 ~ 运算符.
+    // ============================================================
+    assign reg_addr  = reg_addr_w;
+    assign reg_data  = d_latched;
+    assign addr_wr_n = addr_wr_n_w;
+    assign data_wr_n = data_wr_n_w;
+    assign le        = le_w;
+
+    // 抑制未使用信号警告
+    wire _unused = RD_n;
 
 endmodule
