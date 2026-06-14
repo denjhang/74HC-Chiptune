@@ -51,7 +51,7 @@ module wt3_spfm_bus (
     wire le = ~(CS_n | WR_n);
 
     reg [7:0] d_latch = 8'h00;
-    always @(*) begin
+    always @(le or D) begin
         if (le)
             d_latch = D;
     end
