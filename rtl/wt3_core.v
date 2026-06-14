@@ -1,10 +1,11 @@
-// wt3_core.v — 161 + 单片 ROM + 157×5 + 62256 + 377×3 + 283×2 + 273
+// wt3_core.v — 161 + 2×ROM (微码+wavetable) + 157×5 + 62256 + 377×3 + 283×2 + 273
 //
-// 芯片清单 (16 IC):
+// 芯片清单 (17 IC):
 //   SPFM 总线  (3): 373 (透明锁存) + 174 (同步器) + 377 (SPFM 地址寄存器)
 //   数据锁存  (2): 377×2 (reg_a + reg_b)
 //   step 计数  (1): 161 (级联, 5-bit, 32步)
 //   微码 ROM   (1): 39SF040 (8-bit 控制字)
+//   wavetable ROM (1): 39SF040 (8-bit 波形数据, 地址 = reg_a_q)
 //   地址 mux   (5): 157 ×5
 //                   #1 RAM 地址低 4 位 (reg_addr vs mc_ram_addr)
 //                   #2 RAM 地址高 4 位
@@ -13,23 +14,24 @@
 //                   #5 WE 选择 + OE 选择
 //   参数 RAM   (1): 62256 (32K×8)
 //   加法器     (2): 283 ×2 级联成 8-bit 全加器
-//   输出锁存   (1): 273 (8-bit D 触发器, 持续锁存 reg_a)
+//   输出锁存   (1): 273 (8-bit D 触发器, 锁存 wavetable ROM 输出)
 //
 // 微码 ROM 控制字 (8-bit):
-//   bit 7: ram_oe_n   (0=read RAM)
-//   bit 6: latch_a_n  (0=latch to reg_a, 低有效)
-//   bit 5: latch_b_n  (0=latch to reg_b, 低有效)
-//   bit 4: mc_we_n    (0=write adder result back to RAM)
-//   bit 3-0: ram_addr[3:0]
+//   bit 7: ram_oe_n    (0=read RAM)
+//   bit 6: latch_a_n   (0=latch to reg_a, 低有效)
+//   bit 5: latch_b_n   (0=latch to reg_b, 低有效)
+//   bit 4: mc_we_n     (0=write adder result back to RAM)
+//   bit 3: latch_dac_clk (上升沿锁存 wavetable ROM 输出到 273)
+//   bit 2-0: ram_addr[2:0]
 //
-// 数据通路 (单通道 8-bit 相位累加):
-//   step 0: OE=0, addr=0x00 (read phase_acc, RAM 输出稳定)
+// 数据通路 (单通道 8-bit 相位累加 + wavetable 查表):
+//   step 0: OE=0, addr=0x00 (read phase_acc)
 //   step 1: latch_a_n=0, OE=0, addr=0x00 (377_a 锁存 RAM[0])
 //   step 2: OE=0, addr=0x01 (read phase_step)
 //   step 3: latch_b_n=0, OE=0, addr=0x01 (377_b 锁存 RAM[1])
-//   step 4: mc_we_n=0, addr=0x00 (写回 283×2 结果到 RAM[0])
-//   step 5-31: NOP
-//   273 持续锁存 reg_a (STEP_CLK 每个 posedge 跟踪)
+//   step 4: mc_we_n=0, addr=0x00 (写回 283×2 结果到 RAM[0], reg_a 已更新)
+//   step 5: latch_dac_clk 上升沿 (wavetable ROM 输出稳定后, 273 锁存)
+//   step 6-31: NOP
 //   32 步循环 = 1 次累加, 96kHz
 
 `timescale 1ns/1ps
@@ -66,7 +68,8 @@ module wt3_core (
     wire       latch_a_n;
     wire       latch_b_n;
     wire       mc_we_n;
-    wire [3:0] mc_ram_addr;
+    wire       latch_dac_clk;
+    wire [2:0] mc_ram_addr;
 
     wire [7:0] ram_addr;
     wire [7:0] ram_do;
@@ -74,19 +77,22 @@ module wt3_core (
     wire       ram_we_n;
     wire [7:0] ram_di;
 
+    wire [7:0] wave_do;
+
     // ============================================================
     // Microcode decode
     // ============================================================
-    assign ram_oe_n_mc = ucode[7];
-    assign latch_a_n   = ucode[6];
-    assign latch_b_n   = ucode[5];
-    assign mc_we_n     = ucode[4];
-    assign mc_ram_addr = ucode[3:0];
+    assign ram_oe_n_mc   = ucode[7];
+    assign latch_a_n     = ucode[6];
+    assign latch_b_n     = ucode[5];
+    assign mc_we_n       = ucode[4];
+    assign latch_dac_clk = ucode[3];
+    assign mc_ram_addr   = ucode[2:0];
 
     // ============================================================
     // 157 #1: RAM 地址 mux 低 4 位
     //   Select=0 (SPFM) → reg_addr[3:0]
-    //   Select=1 (微码) → mc_ram_addr[3:0]
+    //   Select=1 (微码) → {mc_ram_addr[2:0], 0}
     // ============================================================
     wire mux1_y0, mux1_y1, mux1_y2, mux1_y3;
 
@@ -95,7 +101,7 @@ module wt3_core (
         .A1(reg_addr[0]),     .B1(mc_ram_addr[0]),
         .A2(reg_addr[1]),     .B2(mc_ram_addr[1]),
         .A3(reg_addr[2]),     .B3(mc_ram_addr[2]),
-        .A4(reg_addr[3]),     .B4(mc_ram_addr[3]),
+        .A4(reg_addr[3]),     .B4(1'b0),
         .Enable_n(1'b0),
         .Y1(mux1_y0), .Y2(mux1_y1),
         .Y3(mux1_y2), .Y4(mux1_y3)
@@ -293,14 +299,32 @@ module wt3_core (
     );
 
     // ============================================================
+    // wavetable ROM (1 × 39SF040, 8-bit)
+    //   地址: reg_a_q[7:0] (相位累加值)
+    //   输出: 8-bit 波形数据
+    //   tAA=55ns, reg_a 稳定后 55ns 输出有效
+    // ============================================================
+    hc39sf040 #(.INIT_FILE("rom/wt3_wavetable.hex")) u_wave (
+        .A0(reg_a_q[0]),  .A1(reg_a_q[1]),  .A2(reg_a_q[2]),
+        .A3(reg_a_q[3]),  .A4(reg_a_q[4]),  .A5(reg_a_q[5]),
+        .A6(reg_a_q[6]),  .A7(reg_a_q[7]),
+        .A8(1'b0), .A9(1'b0), .A10(1'b0), .A11(1'b0),
+        .A12(1'b0), .A13(1'b0), .A14(1'b0), .A15(1'b0),
+        .A16(1'b0), .A17(1'b0), .A18(1'b0),
+        .DQ(wave_do),
+        .CE_n(1'b0), .OE_n(1'b0), .WE_n(1'b1)
+    );
+
+    // ============================================================
     // 273: 8-bit 输出锁存器
-    //   持续锁存 reg_a (STEP_CLK 每个 posedge 跟踪)
+    //   锁存 wavetable ROM 输出 (D=wave_do)
+    //   CLK = 微码 bit 3 (latch_dac_clk), 上升沿锁存
     //   实际硬件: DAC 直接读 273 输出
     // ============================================================
     ttl_74273 #(.WIDTH(8), .DELAY_RISE(15), .DELAY_FALL(15)) u_dac (
         .Clear_bar(SPFM_RST_n),
-        .D(reg_a_q),
-        .Clk(STEP_CLK),
+        .D(wave_do),
+        .Clk(latch_dac_clk),
         .Q(dac_out)
     );
 

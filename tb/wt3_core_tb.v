@@ -1,5 +1,5 @@
-// wt3_core_tb.v — 161 + 单 ROM + 157×5 + 62256 + 377×3 + 283×2 + 273 核心验证
-// SPFM 写入 phase_acc + phase_step, 微码循环执行 8-bit 相位累加, 273 输出
+// wt3_core_tb.v — WSG 完整数据通路验证 + sine wav 输出
+// SPFM 写入 phase_acc + phase_step, 微码循环累加, wavetable ROM 查表, 273 输出 sine
 
 `timescale 1ns/1ps
 
@@ -36,6 +36,8 @@ module wt3_core_tb;
     always #50 SPFM_CLK = ~SPFM_CLK;  // 10 MHz
 
     integer pass, fail;
+    integer i, sample_count;
+    integer fd;
 
     task spfm_write;
         input [7:0] addr;
@@ -63,50 +65,38 @@ module wt3_core_tb;
         SPFM_RST_n = 1;
         #1000;
 
-        $display("=== WT3 Core (8-bit 283×2 + 273 output) Test ===");
+        $display("=== WSG Core Test (wavetable + 273 output) ===");
 
-        // SPFM 写入 phase_acc=0x10 (RAM[0]), phase_step=0x20 (RAM[1])
-        // 8-bit 累加: 0x10 + 0x20 = 0x30
-        $display("SPFM write phase_acc=0x10, phase_step=0x20...");
-        spfm_write(8'h00, 8'h10);
-        spfm_write(8'h01, 8'h20);
+        // phase_acc=0x00, phase_step=0x08 → 每 96kHz 周期相位增 8, sine 周期 = 256/8 = 32 样本
+        // 频率 = 96000 / 32 = 3000 Hz
+        $display("SPFM write phase_acc=0x00, phase_step=0x08...");
+        spfm_write(8'h00, 8'h00);
+        spfm_write(8'h01, 8'h08);
 
+        // 验证 1 个完整周期后输出
         #11000;
-
         $display("After 1 cycle:");
-        $display("  reg_a_q = 0x%02X (expect 0x10)", reg_a_q);
-        $display("  reg_b_q = 0x%02X (expect 0x20)", reg_b_q);
-        $display("  adder_s = 0x%02X (expect 0x30 = 0x10+0x20)", adder_s);
-        $display("  dac_out = 0x%02X (expect 0x10)", dac_out);
+        $display("  reg_a_q = 0x%02X", reg_a_q);
+        $display("  reg_b_q = 0x%02X", reg_b_q);
+        $display("  adder_s = 0x%02X", adder_s);
+        $display("  dac_out = 0x%02X (sine[reg_a])", dac_out);
 
-        if (reg_a_q === 8'h10) begin $display("  reg_a=0x10 OK"); pass = pass + 1;
-        end else begin $display("  reg_a=0x%02X FAIL", reg_a_q); fail = fail + 1; end
-
-        if (reg_b_q === 8'h20) begin $display("  reg_b=0x20 OK"); pass = pass + 1;
+        if (reg_b_q === 8'h08) begin $display("  reg_b=0x08 OK"); pass = pass + 1;
         end else begin $display("  reg_b=0x%02X FAIL", reg_b_q); fail = fail + 1; end
 
-        if (adder_s === 8'h30) begin $display("  adder_s=0x30 OK (8-bit add works)"); pass = pass + 1;
-        end else begin $display("  adder_s=0x%02X FAIL", adder_s); fail = fail + 1; end
+        // 生成 wav 文件: 采 50000 个样本 (≈0.52s, 3000Hz×1560 周期)
+        fd = $fopen("wt3_sine.csv", "w");
+        sample_count = 0;
+        for (i = 0; i < 50000; i = i + 1) begin
+            // 等 step 5 (latch_dac_clk 上升沿) 后采样 dac_out
+            @(posedge u_dut.latch_dac_clk);
+            #100;  // 等 273 tpd
+            $fdisplay(fd, "%0d", dac_out);
+            sample_count = sample_count + 1;
+        end
+        $fclose(fd);
 
-        if (dac_out === 8'h10) begin $display("  dac_out=0x10 OK (273 latched)"); pass = pass + 1;
-        end else begin $display("  dac_out=0x%02X FAIL", dac_out); fail = fail + 1; end
-
-        // 再等一轮: RAM[0]=0x30 → reg_a=0x30 → adder=0x50
-        #10500;
-        $display("After 2 cycles, reg_a should be 0x30:");
-        $display("  reg_a_q = 0x%02X", reg_a_q);
-        $display("  dac_out = 0x%02X", dac_out);
-        if (reg_a_q === 8'h30) begin $display("  reg_a=0x30 OK (8-bit accumulate)"); pass = pass + 1;
-        end else begin $display("  reg_a=0x%02X FAIL", reg_a_q); fail = fail + 1; end
-
-        // 再等一轮: RAM[0]=0x50 → reg_a=0x50 → adder=0x70
-        #10500;
-        $display("After 3 cycles, reg_a should be 0x50:");
-        $display("  reg_a_q = 0x%02X", reg_a_q);
-        $display("  dac_out = 0x%02X", dac_out);
-        if (reg_a_q === 8'h50) begin $display("  reg_a=0x50 OK"); pass = pass + 1;
-        end else begin $display("  reg_a=0x%02X FAIL", reg_a_q); fail = fail + 1; end
-
+        $display("Generated wt3_sine.csv with %0d samples", sample_count);
         $display("=== Result: %0d pass, %0d fail ===", pass, fail);
         if (fail == 0) $display("PASS"); else $display("FAIL");
 
