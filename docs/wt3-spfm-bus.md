@@ -46,10 +46,10 @@ U3: 377 地址寄存器 (posedge CLK, Enable_bar=~addr_wr_pulse)
   addr_wr_pulse=1 期间锁存 d_latch → reg_addr
   ↓
 输出:
-  reg_addr      — 锁存的地址 (8-bit)
-  reg_data      — 锁存的数据 (8-bit, 来自 373)
-  addr_wr_pulse — 写地址脉冲 (1 clk 高, posedge CLK 对齐)
-  data_wr_pulse — 写数据脉冲 (1 clk 高, posedge CLK 对齐)
+  reg_addr       — 锁存的地址 (8-bit)
+  reg_data       — 锁存的数据 (8-bit, 来自 373)
+  addr_wr_pulse_n — 写地址脉冲 (1 clk 低, posedge CLK 对齐, 低有效)
+  data_wr_pulse_n — 写数据脉冲 (1 clk 低, posedge CLK 对齐, 低有效)
 ```
 
 ## 时序约束

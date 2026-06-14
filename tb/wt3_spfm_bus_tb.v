@@ -10,18 +10,18 @@ module wt3_spfm_bus_tb;
     reg A0, CS_n, WR_n, RD_n;
 
     wire [7:0] reg_addr, reg_data;
-    wire addr_wr_pulse, data_wr_pulse;
+    wire addr_wr_pulse_n, data_wr_pulse_n;
 
     wt3_spfm_bus u_spfm (
         .CLK(CLK), .RST_n(RST_n),
         .D(D), .A0(A0),
         .CS_n(CS_n), .WR_n(WR_n), .RD_n(RD_n),
         .reg_addr(reg_addr), .reg_data(reg_data),
-        .addr_wr_pulse(addr_wr_pulse),
-        .data_wr_pulse(data_wr_pulse)
+        .addr_wr_pulse_n(addr_wr_pulse_n),
+        .data_wr_pulse_n(data_wr_pulse_n)
     );
 
-    // 仿真用 RAM (data_wr_pulse 上升沿写入)
+    // 仿真用 RAM (data_wr_pulse_n 下降沿写入)
     reg [7:0] test_ram [0:15];
     integer i;
     initial begin
@@ -29,11 +29,11 @@ module wt3_spfm_bus_tb;
             test_ram[i] = 8'h00;
     end
 
-    reg data_wr_prev = 1'b0;
+    reg data_wr_prev = 1'b1;
     always @(posedge CLK) begin
-        if (!data_wr_prev && data_wr_pulse)
+        if (data_wr_prev && !data_wr_pulse_n)
             test_ram[reg_addr] <= reg_data;
-        data_wr_prev <= data_wr_pulse;
+        data_wr_prev <= data_wr_pulse_n;
     end
 
     // 时钟 10MHz
@@ -60,8 +60,8 @@ module wt3_spfm_bus_tb;
         repeat(3) @(posedge CLK);
         CS_n = 1; WR_n = 1;
         repeat(3) @(posedge CLK);
-        $display("Wrote addr=0x02 data=0xAA  reg_addr=0x%02X reg_data=0x%02X addr_wr_p=%b data_wr_p=%b",
-            reg_addr, reg_data, addr_wr_pulse, data_wr_pulse);
+        $display("Wrote addr=0x02 data=0xAA  reg_addr=0x%02X reg_data=0x%02X addr_wr_p_n=%b data_wr_p_n=%b",
+            reg_addr, reg_data, addr_wr_pulse_n, data_wr_pulse_n);
 
         // 写地址 0x05, 数据 0x55
         @(negedge CLK);

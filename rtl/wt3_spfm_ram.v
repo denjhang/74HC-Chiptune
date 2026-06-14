@@ -35,16 +35,16 @@ module wt3_spfm_ram (
     // ============================================================
     wire [7:0] reg_addr;
     wire [7:0] reg_data;
-    wire       addr_wr_pulse;
-    wire       data_wr_pulse;
+    wire       addr_wr_pulse_n;
+    wire       data_wr_pulse_n;
 
     wt3_spfm_bus u_spfm (
         .CLK(CLK), .RST_n(RST_n),
         .D(D), .A0(A0),
         .CS_n(CS_n), .WR_n(WR_n), .RD_n(RD_n),
         .reg_addr(reg_addr), .reg_data(reg_data),
-        .addr_wr_pulse(addr_wr_pulse),
-        .data_wr_pulse(data_wr_pulse)
+        .addr_wr_pulse_n(addr_wr_pulse_n),
+        .data_wr_pulse_n(data_wr_pulse_n)
     );
 
     // ============================================================
@@ -53,7 +53,7 @@ module wt3_spfm_ram (
     //   读: RD_n 低有效 → OE_n 低有效
     //   A[14:8] = 0 (只用低 256 字节)
     // ============================================================
-    wire ram_we_n = ~data_wr_pulse;
+    wire ram_we_n = data_wr_pulse_n;
     wire ram_oe_n = RD_n;
 
     hc62256 u_ram (

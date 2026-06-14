@@ -36,8 +36,8 @@ module wt3_spfm_bus (
     // 内部寄存器输出
     output wire [7:0]  reg_addr,
     output wire [7:0]  reg_data,
-    output wire        addr_wr_pulse,   // posedge CLK 1 clk 高脉冲 (写地址)
-    output wire        data_wr_pulse    // posedge CLK 1 clk 高脉冲 (写数据)
+    output wire        addr_wr_pulse_n, // posedge CLK 1 clk 低脉冲 (写地址, 低有效)
+    output wire        data_wr_pulse_n  // posedge CLK 1 clk 低脉冲 (写数据, 低有效)
 );
 
     // ============================================================
@@ -106,18 +106,17 @@ module wt3_spfm_bus (
         end
     end
 
-    // 上升沿检测: 当 R2 从 0→1 时, r3 还是 0 (上一拍的 R2 值)
-    // 所以脉冲 = R2 & ~R3
-    assign addr_wr_pulse = addr_wr_r2 & ~addr_wr_r3;
-    assign data_wr_pulse = data_wr_r2 & ~data_wr_r1;
+    // 下降沿检测: R2=1 & R3=0 → 脉冲=1, 取反得到低有效
+    assign addr_wr_pulse_n = ~(addr_wr_r2 & ~addr_wr_r3);
+    assign data_wr_pulse_n = ~(data_wr_r2 & ~data_wr_r1);
 
     // ============================================================
     // U3: 74HC377 — 地址寄存器
     //   posedge CLK, Enable_bar=0 时锁存
-    //   addr_wr_pulse=1 期间 Enable_bar=0
+    //   addr_wr_pulse_n=0 期间 Enable_bar=0 (直接接, 无隐藏反相)
     // ============================================================
     hc377 u_addr_reg (
-        .Enable_bar(~addr_wr_pulse),
+        .Enable_bar(addr_wr_pulse_n),
         .D(d_latch),
         .Clk(CLK),
         .Q(reg_addr)
