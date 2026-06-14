@@ -69,6 +69,7 @@ module wt3_core (
     wire       data_wr_pulse_n;
 
     wire [5:0] step;
+    wire       step_hi_cep;   // hc08 输出: AND(tc_lo, RST_n) → hc161 CEP
 
     wire [7:0] ucode;
     wire       ram_oe_n_mc;
@@ -97,10 +98,13 @@ module wt3_core (
 
     // ============================================================
     // 154: step[3:0] 硬译码 latch/dac_clk
+    //   使能 G_n = decode_disable: SPFM 写期间 (CS_n=0) 或复位期间 (RST_n=0) 禁止
+    //   decode_disable = OR(NOT RST_n, NOT CS_n)  ← 用 hc04 (2 路) + hc32 (1 路) 显式实现
     // ============================================================
     wire [15:0] decode_y;
-    // SPFM 写期间 (CS_n=0) 或复位期间 (RST_n=0) 禁止 latch/dac
-    wire decode_disable = ~SPFM_RST_n | ~SPFM_CS_n;
+    wire rst_n_inv;       // = ~SPFM_RST_n (hc04 Y2)
+    wire cs_n_inv;        // = ~SPFM_CS_n  (hc04 Y3)
+    wire decode_disable;  // = OR(rst_n_inv, cs_n_inv)  (hc32 Y1)
 
     hc154 u_decode (
         .A({step[3], step[2], step[1], step[0]}),
@@ -116,18 +120,32 @@ module wt3_core (
     wire dac_clk_n    = decode_y[13];  // step=13 (低有效)
 
     // ============================================================
-    // 74HC04 — 六反相器 (1 片, 用 1 路: dac_clk_n → latch_dac)
-    //   反相 154 Y13 (低有效) 为上升沿, 送 U_dac (273) CP
-    // 其余 5 路未用, 接 GND
+    // 74HC04 — 六反相器 (1 片, 用 3 路)
+    //   Y1 = ~dac_clk_n       → latch_dac         (送 U_dac/273 CP)
+    //   Y2 = ~SPFM_RST_n      → rst_n_inv         (送 hc32 U_or.A1)
+    //   Y3 = ~SPFM_CS_n       → cs_n_inv          (送 hc32 U_or.B1)
+    // 其余 3 路未用, 接 GND
     // (spfm_bus 内还有 1 片 hc04, 处理 addr_q3/data_q2 反相)
     // ============================================================
     hc04 u_inv (
-        .A1(dac_clk_n), .Y1(latch_dac),
-        .A2(1'b0),      .Y2(),
-        .A3(1'b0),      .Y3(),
-        .A4(1'b0),      .Y4(),
-        .A5(1'b0),      .Y5(),
-        .A6(1'b0),      .Y6()
+        .A1(dac_clk_n),   .Y1(latch_dac),
+        .A2(SPFM_RST_n),  .Y2(rst_n_inv),
+        .A3(SPFM_CS_n),   .Y3(cs_n_inv),
+        .A4(1'b0),        .Y4(),
+        .A5(1'b0),        .Y5(),
+        .A6(1'b0),        .Y6()
+    );
+
+    // ============================================================
+    // 74HC32 — 四 2 输入或门 (1 片, 用 1 路)
+    //   Y1 = OR(rst_n_inv, cs_n_inv) → decode_disable (送 U_decode/154 G_n)
+    //   等价于 ~RST_n | ~CS_n = NOR(RST_n, CS_n)
+    // ============================================================
+    hc32 u_or (
+        .A1(rst_n_inv), .B1(cs_n_inv), .Y1(decode_disable),
+        .A2(1'b0), .B2(1'b0), .Y2(),
+        .A3(1'b0), .B3(1'b0), .Y3(),
+        .A4(1'b0), .B4(1'b0), .Y4()
     );
 
     // ============================================================
@@ -296,7 +314,19 @@ module wt3_core (
         .MR(1'b1), .CP(STEP_CLK),
         .D0(1'b0), .D1(1'b0), .D2(1'b0), .D3(1'b0),
         .Q0(step_hi[0]), .Q1(step_hi[1]), .Q2(), .Q3(),
-        .CEP(tc_lo & SPFM_RST_n), .CET(SPFM_RST_n), .PE(1'b1), .TC()
+        .CEP(step_hi_cep), .CET(SPFM_RST_n), .PE(1'b1), .TC()
+    );
+
+    // ============================================================
+    // 74HC08 — 四 2 输入与门 (1 片, 用 1 路)
+    //   Y1 = AND(tc_lo, SPFM_RST_n) → step_hi_cep (送 U_step_hi/161 CEP)
+    //   作用: 复位时停计数, 正常时级联 (tc_lo 进位时 step_hi+1)
+    // ============================================================
+    hc08 u_and (
+        .A1(tc_lo), .B1(SPFM_RST_n), .Y1(step_hi_cep),
+        .A2(1'b0), .B2(1'b0), .Y2(),
+        .A3(1'b0), .B3(1'b0), .Y3(),
+        .A4(1'b0), .B4(1'b0), .Y4()
     );
 
     assign step = {step_hi, step_lo};

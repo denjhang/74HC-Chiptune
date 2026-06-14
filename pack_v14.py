@@ -9,6 +9,8 @@ FILES = [
     "rtl/wt3_core.v",
     "rtl/wt3_spfm_bus.v",
     "rtl/hc04.v",
+    "rtl/hc08.v",
+    "rtl/hc32.v",
     "rtl/hc154.v",
     "rtl/hc157.v",
     "rtl/hc161.v",
