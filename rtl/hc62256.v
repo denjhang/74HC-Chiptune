@@ -55,18 +55,20 @@ module hc62256 (
     wire [14:0] addr = {A14, A13, A12, A11, A10, A9, A8,
                         A7, A6, A5, A4, A3, A2, A1, A0};
 
-    // 写: WE_n 下降沿锁存 (WE_n 从 1→0 时)
-    // 真实硬件在 WE_n 或 CE_n 上升沿锁存,
-    // 仿真用下降沿更直观 (写入脉冲开始时锁存)
-    reg WE_r = 1'b1;
+    // 写: WE_n 下降沿锁存, tWP ≥ 55ns 写脉冲宽度
+    reg [7:0] do_r = 8'hzz;
+
     always @(negedge WE_n) begin
-        if (!CE_n) begin
-            #1 mem[addr] = DI;  // 1ns 延迟避免仿真竞争
-        end
-        WE_r <= WE_n;
+        if (!CE_n)
+            #55 mem[addr] = DI;
     end
 
-    // 读: CE=0 且 OE=0 时输出存储数据
-    assign DO = (!CE_n && !OE_n) ? mem[addr] : 8'hzz;
+    // 读: tAA ≥ 55ns 地址访问时间
+    // DO 在地址/OE 变化后 55ns 稳定
+    reg [7:0] do_read = 8'hzz;
+    always @(*) begin
+        #55 do_read = (!CE_n && !OE_n) ? mem[addr] : 8'hzz;
+    end
+    assign #55 DO = do_read;
 
 endmodule

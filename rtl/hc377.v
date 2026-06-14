@@ -33,7 +33,7 @@ module hc377 (
 
     always @(posedge Clk) begin
         if (!Enable_bar)
-            #1 q_reg <= D;  // 1ns propagation delay (真实硬件 ~15ns)
+            #15 q_reg <= D;  // tpd ~15ns
     end
 
     assign Q = q_reg;

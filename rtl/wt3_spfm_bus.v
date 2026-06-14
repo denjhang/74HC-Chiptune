@@ -91,11 +91,11 @@ module wt3_spfm_bus (
             data_wr_r1 <= 1'b0;
             data_wr_r2 <= 1'b0;
         end else begin
-            #1 addr_wr_r1 <= addr_wr_comb;  // 1ns propagation (真实 ~15ns)
-            #1 addr_wr_r2 <= addr_wr_r1;
-            #1 addr_wr_r3 <= addr_wr_r2;
-            #1 data_wr_r1 <= data_wr_comb;
-            #1 data_wr_r2 <= data_wr_r1;
+            #15 addr_wr_r1 <= addr_wr_comb;  // tpd ~15ns
+            #15 addr_wr_r2 <= addr_wr_r1;
+            #15 addr_wr_r3 <= addr_wr_r2;
+            #15 data_wr_r1 <= data_wr_comb;
+            #15 data_wr_r2 <= data_wr_r1;
         end
     end
 
