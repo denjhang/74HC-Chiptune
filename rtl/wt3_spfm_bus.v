@@ -8,16 +8,19 @@
 // 架构:
 //   U1: 74HC373 — D[7:0] 透明锁存
 //       LE = ~(CS_n | WR_n)  (CS=0 & WR=0 时透明)
-//   U2: 74HC174 — 同步器 (addr_wr 用 4 个 FF, data_wr 用 2 个 FF)
-//       addr_wr: R1,R2 两级同步 + 上升沿检测(R3) 产生 1 clk 脉冲
-//       data_wr: R1,R2 两级同步 (电平输出, 外部用下降沿检测)
+//   U2: 74HC174 — 同步器 (addr_wr 3级 + data_wr 2级)
+//       输出延迟后的同步电平 (非边沿检测)
 //   U3: 74HC377 — 地址寄存器
-//       Enable_bar = addr_wr_pulse (上升沿脉冲), posedge CLK 锁存
+//       Enable_bar = addr_wr_pulse_n (同步后低有效)
 //
 // 同步链:
-//   主机信号 → 异步锁存(373) → 2级同步(174) → 上升沿检测 → 1 clk 脉冲
+//   主机信号 → 异步锁存(373) → 组合译码 → 2级同步(174) → 延迟输出
 //
-// 译码: 组合逻辑 (AND 门, 可用 7408 实现)
+// 输出极性: 全部低有效 (与 CS_n/WR_n/RD_n/RST_n 一致)
+//   addr_wr_pulse_n: 写地址脉冲 (低有效, 直连 377 Enable_bar)
+//   data_wr_pulse_n: 写数据脉冲 (低有效, 直连 62256 WE_n)
+//
+// 译码: 组合逻辑 (PCB 飞线 AND + INV)
 //   write_active = ~CS_n & ~WR_n & RST_n  (高有效: 写操作进行中)
 //   addr_wr_comb = write_active & ~A0     (写地址时为高)
 //   data_wr_comb = write_active & A0      (写数据时为高)
@@ -33,11 +36,11 @@ module wt3_spfm_bus (
     input  wire        WR_n,
     input  wire        RD_n,
 
-    // 内部寄存器输出
+    // 内部寄存器输出 (低有效)
     output wire [7:0]  reg_addr,
     output wire [7:0]  reg_data,
-    output wire        addr_wr_pulse_n, // posedge CLK 1 clk 低脉冲 (写地址, 低有效)
-    output wire        data_wr_pulse_n  // posedge CLK 1 clk 低脉冲 (写数据, 低有效)
+    output wire        addr_wr_pulse_n,
+    output wire        data_wr_pulse_n
 );
 
     // ============================================================
@@ -54,39 +57,29 @@ module wt3_spfm_bus (
     end
 
     // ============================================================
-    // 译码: 组合逻辑 (AND 门)
-    //   write_active: 高有效, CS=0 & WR=0 & RST=1 时为高
+    // 译码: 组合逻辑 (PCB 飞线 AND + INV)
     // ============================================================
     wire write_active = ~CS_n & ~WR_n & RST_n;
     wire addr_wr_comb = write_active & ~A0;
     wire data_wr_comb = write_active & A0;
 
     // ============================================================
-    // U2: 74HC174 — 同步器 (6 个 FF, 用 4+2)
+    // U2: 74HC174 — 同步器 (6 个 FF, 用 3+2+1)
     //
-    // addr_wr 通道: 3 级 FF + 边沿检测
-    //   R1: 第一级同步 (消除亚稳态)
-    //   R2: 第二级同步 (稳定信号)
-    //   上升沿检测: R2=1 & R1=0 → addr_wr_pulse=1 (1 clk 宽)
-    //   实际用 R2 上升沿: 在 R2 刚变高的那个时钟周期产生脉冲
-    //   但 R2 采样的是 addr_wr_comb, 如果 comb 已经持续多周期高,
-    //   R1 也已经高, 则 R2 上升沿只发生在第一拍
+    // 同步链: comb → R1 → R2 → R3
+    //   addr_wr_pulse_n = ~R3: write_active 变高后第 3 个 clk 变低
+    //     377 在该 posedge 看到 Enable_bar=0, 锁存 d_latch (已稳定)
+    //   data_wr_pulse_n = ~R2: write_active 变高后第 2 个 clk 变低
+    //     62256 WE_n 变低, 在下一个 posge 前写入完成
     //
-    // data_wr 通道: 2 级 FF + 边沿检测
-    //   R1: 第一级同步
-    //   R2: 第二级同步
-    //   上升沿检测: R2=1 & R1_prev=0 (R1的前一拍值)
-    //   由于 R2 <= R1, 当 R1 从 0→1 时, 下一个时钟 R2 也从 0→1
-    //   所以检测 R2 上升沿等效于检测 R1 的前一个时钟周期
-    //   简化: 用 ~R2_delayed & R2 作为脉冲 (R2 的上升沿)
+    // 脉冲宽度 ≈ write_active 持续时间 - 同步延迟
+    // CPU 写脉冲 ≥3 clk 即可保证至少 1 clk 有效脉冲
     // ============================================================
 
-    // addr_wr 通道
     reg addr_wr_r1 = 1'b0;
     reg addr_wr_r2 = 1'b0;
-    reg addr_wr_r3 = 1'b0;  // 延迟一拍, 用于上升沿检测
+    reg addr_wr_r3 = 1'b0;
 
-    // data_wr 通道
     reg data_wr_r1 = 1'b0;
     reg data_wr_r2 = 1'b0;
 
@@ -98,22 +91,23 @@ module wt3_spfm_bus (
             data_wr_r1 <= 1'b0;
             data_wr_r2 <= 1'b0;
         end else begin
-            addr_wr_r1 <= addr_wr_comb;
-            addr_wr_r2 <= addr_wr_r1;
-            addr_wr_r3 <= addr_wr_r2;
-            data_wr_r1 <= data_wr_comb;
-            data_wr_r2 <= data_wr_r1;
+            #1 addr_wr_r1 <= addr_wr_comb;  // 1ns propagation (真实 ~15ns)
+            #1 addr_wr_r2 <= addr_wr_r1;
+            #1 addr_wr_r3 <= addr_wr_r2;
+            #1 data_wr_r1 <= data_wr_comb;
+            #1 data_wr_r2 <= data_wr_r1;
         end
     end
 
-    // 下降沿检测: R2=1 & R3=0 → 脉冲=1, 取反得到低有效
-    assign addr_wr_pulse_n = ~(addr_wr_r2 & ~addr_wr_r3);
-    assign data_wr_pulse_n = ~(data_wr_r2 & ~data_wr_r1);
+    // 同步后取反: 延迟足够的 clk 后变低, 下游在 posedge 能采样到
+    assign addr_wr_pulse_n = ~addr_wr_r3;
+    assign data_wr_pulse_n = ~data_wr_r2;
 
     // ============================================================
     // U3: 74HC377 — 地址寄存器
     //   posedge CLK, Enable_bar=0 时锁存
-    //   addr_wr_pulse_n=0 期间 Enable_bar=0 (直接接, 无隐藏反相)
+    //   addr_wr_pulse_n=0 时 Enable_bar=0 (直连, 无隐藏反相)
+    //   d_latch 在此之前已由 373 锁存 (CS/WR 恢复后 LE=0)
     // ============================================================
     hc377 u_addr_reg (
         .Enable_bar(addr_wr_pulse_n),

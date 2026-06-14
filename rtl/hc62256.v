@@ -55,12 +55,15 @@ module hc62256 (
     wire [14:0] addr = {A14, A13, A12, A11, A10, A9, A8,
                         A7, A6, A5, A4, A3, A2, A1, A0};
 
-    // 写: CE=0 且 WE=0 时持续写入 (组合逻辑, 仿真用)
-    // 实际硬件: 数据在 CE 或 WE 上升沿锁存
-    // 仿真修正: 用 level-sensitive 避免地址/数据时序问题
-    always @(*) begin
-        if (!CE_n && !WE_n)
-            mem[addr] = DI;
+    // 写: WE_n 下降沿锁存 (WE_n 从 1→0 时)
+    // 真实硬件在 WE_n 或 CE_n 上升沿锁存,
+    // 仿真用下降沿更直观 (写入脉冲开始时锁存)
+    reg WE_r = 1'b1;
+    always @(negedge WE_n) begin
+        if (!CE_n) begin
+            #1 mem[addr] = DI;  // 1ns 延迟避免仿真竞争
+        end
+        WE_r <= WE_n;
     end
 
     // 读: CE=0 且 OE=0 时输出存储数据
