@@ -3,16 +3,16 @@
 // 74HC377 — 20-pin DIP 封装
 // 8 路 positive-edge-triggered D 触发器, 共享 CLK 和 Enable
 //
-// 引脚映射 (DIP-20):
-//   Pin  1: Enable_bar (低有效)
+// 引脚映射 (DIP-20) — Nexperia 74HC_HCT377 datasheet:
+//   Pin  1: /Enable (低有效)
 //   Pin  2: Q0  Pin 19: D0
 //   Pin  3: D1  Pin 18: Q1
 //   Pin  4: Q2  Pin 17: D2
 //   Pin  5: D3  Pin 16: Q3
 //   Pin  6: Q4  Pin 15: D4
-//   Pin  7: D5  Pin 14: Q4
-//   Pin  8: Q6  Pin 13: D5
-//   Pin  9: D7  Pin 12: Q6
+//   Pin  7: D5  Pin 14: Q5
+//   Pin  8: Q6  Pin 13: D6
+//   Pin  9: D7  Pin 12: Q7
 //   Pin 10: GND Pin 11: CLK
 //   Pin 20: VDD
 //

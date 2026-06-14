@@ -5,25 +5,27 @@
 //   写数据: A0=1, CS_n=0, WR_n=0 → data_wr 脉冲
 //   间隙:   CS_n=1 或 WR_n=1
 //
-// 架构:
+// 架构 (3 显式芯片实例):
 //   U1: 74HC373 — D[7:0] 透明锁存
-//       LE = ~(CS_n | WR_n)  (CS=0 & WR=0 时透明)
-//   U2: 74HC174 — 同步器 (addr_wr 3级 + data_wr 2级)
-//       输出延迟后的同步电平 (非边沿检测)
+//       LE = ~(CS_n | WR_n)  (CS=0 & WR=0 时透明) — 外部协议译码
+//       /OE = GND (常输出)
+//   U2: 74HC174 — 同步器 (5 级 D-FF: 3 级 addr_wr + 2 级 data_wr)
+//       输入: addr_wr_comb / data_wr_comb (外部协议译码)
+//       输出: 延迟后的同步电平
 //   U3: 74HC377 — 地址寄存器
-//       Enable_bar = addr_wr_pulse_n (同步后低有效)
+//       Enable_bar = ~addr_sync_r3 (取反, 外部协议译码)
 //
 // 同步链:
-//   主机信号 → 异步锁存(373) → 组合译码 → 2级同步(174) → 延迟输出
+//   主机信号 → 异步锁存(373) → 外部协议译码 → 3级同步(174) → 延迟输出
 //
 // 输出极性: 全部低有效 (与 CS_n/WR_n/RD_n/RST_n 一致)
 //   addr_wr_pulse_n: 写地址脉冲 (低有效, 直连 377 Enable_bar)
 //   data_wr_pulse_n: 写数据脉冲 (低有效, 直连 62256 WE_n)
 //
-// 译码: 组合逻辑 (PCB 飞线 AND + INV)
-//   write_active = ~CS_n & ~WR_n & RST_n  (高有效: 写操作进行中)
-//   addr_wr_comb = write_active & ~A0     (写地址时为高)
-//   data_wr_comb = write_active & A0      (写数据时为高)
+// 外部协议译码 (PCB 飞线, 不归声卡):
+//   write_active = ~CS_n & ~WR_n & RST_n
+//   addr_wr_comb = write_active & ~A0
+//   data_wr_comb = write_active & A0
 
 `timescale 1ns/1ps
 
@@ -44,64 +46,66 @@ module wt3_spfm_bus (
 );
 
     // ============================================================
-    // U1: 74HC373 — D[7:0] 透明锁存
-    //   LE=1 (CS=0 & WR=0): Q 跟随 D
-    //   LE=0: Q 锁存
+    // 外部协议译码 (PCB 飞线, 不算声卡内部门)
     // ============================================================
-    wire le = ~(CS_n | WR_n);
-
-    reg [7:0] d_latch = 8'h00;
-    always @(le or D) begin
-        if (le)
-            d_latch = D;
-    end
-
-    // ============================================================
-    // 译码: 组合逻辑 (PCB 飞线 AND + INV)
-    // ============================================================
+    wire le          = ~(CS_n | WR_n);
     wire write_active = ~CS_n & ~WR_n & RST_n;
     wire addr_wr_comb = write_active & ~A0;
     wire data_wr_comb = write_active & A0;
 
     // ============================================================
-    // U2: 74HC174 — 同步器 (6 个 FF, 用 3+2+1)
+    // U1: 74HC373 — D[7:0] 透明锁存 (真实芯片实例)
+    //   LE=1: Q = D (透明)
+    //   LE=0: Q 锁存
+    //   /OE 常接 GND
+    // ============================================================
+    wire [7:0] d_latch;
+
+    hc373 u_d_latch (
+        .OE_n(1'b0),    // Pin 1: 常输出
+        .LE(le),        // Pin 11: CS_n=0 & WR_n=0 时透明
+        .D(D),          // Pin 3,4,6,8,13,14,16,18: SPFM_D[7:0]
+        .Q(d_latch)     // Pin 2,5,7,9,12,15,17,19
+    );
+
+    assign reg_data = d_latch;
+
+    // ============================================================
+    // U2: 74HC174 — 同步器 (5 个 D-FF 用, 1 路未用)
     //
-    // 同步链: comb → R1 → R2 → R3
-    //   addr_wr_pulse_n = ~R3: write_active 变高后第 3 个 clk 变低
-    //     377 在该 posedge 看到 Enable_bar=0, 锁存 d_latch (已稳定)
-    //   data_wr_pulse_n = ~R2: write_active 变高后第 2 个 clk 变低
-    //     62256 WE_n 变低, 在下一个 posge 前写入完成
+    // 同步链 (3 级 addr_wr + 2 级 data_wr):
+    //   addr: addr_wr_comb → Q1 → Q2 → Q3
+    //   data: data_wr_comb → Q4 → Q5
     //
-    // 脉冲宽度 ≈ write_active 持续时间 - 同步延迟
-    // CPU 写脉冲 ≥3 clk 即可保证至少 1 clk 有效脉冲
+    //   addr_wr_pulse_n = ~Q3: write_active 变高后第 3 个 clk 变低
+    //     377 在该 posedge 看到 Enable_bar=0, 锁存 d_latch
+    //   data_wr_pulse_n = ~Q5: write_active 变高后第 2 个 clk 变低
+    //     62256 WE_n 变低, 在下一个 posedge 前写入完成
     // ============================================================
 
-    reg addr_wr_r1 = 1'b0;
-    reg addr_wr_r2 = 1'b0;
-    reg addr_wr_r3 = 1'b0;
+    wire addr_q1, addr_q2, addr_q3;
+    wire data_q1, data_q2;
 
-    reg data_wr_r1 = 1'b0;
-    reg data_wr_r2 = 1'b0;
+    hc174 u_sync (
+        .CLR(RST_n),
+        .D1(addr_wr_comb),   // Pin 3 → Q1
+        .D2(addr_q1),        // Pin 4 → Q2
+        .D3(addr_q2),        // Pin 6 → Q3
+        .D4(data_wr_comb),   // Pin 14 → Q4
+        .D5(data_q1),        // Pin 13 → Q5
+        .D6(1'b0),           // Pin 11 未用 (D6 接 GND)
+        .CLK(CLK),           // Pin 9
+        .Q1(addr_q1),        // Pin 2
+        .Q2(addr_q2),        // Pin 5
+        .Q3(addr_q3),        // Pin 7
+        .Q4(data_q1),        // Pin 15
+        .Q5(data_q2),        // Pin 12
+        .Q6()                // Pin 10 未用
+    );
 
-    always @(posedge CLK or negedge RST_n) begin
-        if (!RST_n) begin
-            addr_wr_r1 <= 1'b0;
-            addr_wr_r2 <= 1'b0;
-            addr_wr_r3 <= 1'b0;
-            data_wr_r1 <= 1'b0;
-            data_wr_r2 <= 1'b0;
-        end else begin
-            #15 addr_wr_r1 <= addr_wr_comb;  // tpd ~15ns
-            #15 addr_wr_r2 <= addr_wr_r1;
-            #15 addr_wr_r3 <= addr_wr_r2;
-            #15 data_wr_r1 <= data_wr_comb;
-            #15 data_wr_r2 <= data_wr_r1;
-        end
-    end
-
-    // 同步后取反: 延迟足够的 clk 后变低, 下游在 posedge 能采样到
-    assign addr_wr_pulse_n = ~addr_wr_r3;
-    assign data_wr_pulse_n = ~data_wr_r2;
+    // 外部协议译码: 取反输出 (低有效脉冲)
+    assign addr_wr_pulse_n = ~addr_q3;
+    assign data_wr_pulse_n = ~data_q2;
 
     // ============================================================
     // U3: 74HC377 — 地址寄存器
@@ -115,8 +119,5 @@ module wt3_spfm_bus (
         .Clk(CLK),
         .Q(reg_addr)
     );
-
-    // reg_data: 直接用 373 锁存值
-    assign reg_data = d_latch;
 
 endmodule

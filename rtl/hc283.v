@@ -11,7 +11,8 @@
 //   Pin  5: A1    Pin 12: Σ0
 //   Pin  6: B1    Pin 11: C0 (进位输入)
 //   Pin  7: GND   Pin 10: C4 (进位输出)
-//   Pin  8: (NC)  Pin  9: (NC)
+//   Pin  8: NC    Pin  9: NC
+//   (16-pin DIP, Pin 7=GND, Pin 16=VDD, 无额外 NC 脚)
 //
 // 功能: Σ[3:0] = A[3:0] + B[3:0] + C0
 //        C4 = 进位输出
