@@ -25,17 +25,31 @@
 //   bit 2: mc_we_n     (0=write adder result back to RAM)
 //   bit 1-0: ram_addr[1:0]
 //
-// 数据通路 (单通道 8-bit 相位累加 + wavetable 查表 + 音量):
-//   step 0: OE=0, addr=0x00 (read phase_acc)
-//   step 1: latch_a_n=0, OE=0, addr=0x00 (377_a 锁存 RAM[0])
-//   step 2: OE=0, addr=0x01 (read phase_step)
-//   step 3: latch_b_n=0, OE=0, addr=0x01 (377_b 锁存 RAM[1])
-//   step 4: OE=0, addr=0x10 (read volume)
-//   step 5: latch_c_n=0, OE=0, addr=0x10 (377_c 锁存 RAM[2])
-//   step 6: mc_we_n=0, addr=0x00 (写回 283×2 结果到 RAM[0], reg_a 已更新)
-//   step 7: latch_dac_clk 上升沿 (wavetable ROM 输出稳定后, 273 锁存)
-//   step 8-31: NOP
-//   32 步循环 = 1 次累加, 96kHz
+// 数据通路 (6 通道 × 8 step/通道 + 16 step NOP = 64 step 循环):
+//   通道内 step 0: 读 phase_acc
+//   通道内 step 1: latch_a + 读 phase_acc
+//   通道内 step 2: 读 phase_step
+//   通道内 step 3: latch_b + 读 phase_step
+//   通道内 step 4: 读 volume
+//   通道内 step 5: latch_c + 读 volume
+//   通道内 step 6: mc_we_n=0, 写回加法结果到 phase_acc
+//   通道内 step 7: dac_clk 上升沿, 锁存 wavetable 输出
+//   step 48-63: NOP (16 step, 给 SPFM 总线时间)
+//
+//   64 step 循环 = 6 通道各一次累加 + DAC 输出
+//   STEP_CLK=3.072MHz, 每通道采样率 = 3.072M/64 = 48kHz
+//   总采样率 = 6 × 48k = 288kHz (DAC 输出分时切换)
+//
+//   step[5:3] = 通道号 (0-5)
+//   step[2:0] = 通道内 step (0-7)
+//
+//   RAM 地址 = {step[5:3], mc_ram_addr[1:0]} (每通道 4 字节, 实际用 3)
+//     channel 0: RAM[0]=phase_acc, RAM[1]=phase_step, RAM[2]=volume, RAM[3]=reserved
+//     channel 1: RAM[4..7]
+//     channel 2: RAM[8..11]
+//     channel 3: RAM[12..15]
+//     channel 4: RAM[16..19]
+//     channel 5: RAM[20..23]
 
 `timescale 1ns/1ps
 
@@ -54,7 +68,9 @@ module wt3_core (
     output wire [7:0]  reg_b_q,
     output wire [7:0]  reg_c_q,
     output wire [7:0]  adder_s,
-    output wire [7:0]  dac_out
+    output wire [7:0]  dac_out,
+    output wire [2:0]  cur_channel,    // 当前 DAC 输出的通道号 (step[5:3])
+    output wire [2:0]  cur_substep     // 当前 step[2:0] (7 = DAC 锁存时机)
 );
 
     // ============================================================
@@ -65,7 +81,7 @@ module wt3_core (
     wire       addr_wr_pulse_n;
     wire       data_wr_pulse_n;
 
-    wire [4:0] step;
+    wire [5:0] step;
 
     wire [7:0] ucode;
     wire       ram_oe_n_mc;
@@ -74,7 +90,7 @@ module wt3_core (
     wire       latch_c_n;
     wire       mc_we_n;
     wire       latch_dac_clk;
-    wire [1:0] mc_ram_addr;
+    wire [1:0] mc_ram_sub_addr;    // 通道内偏移 (0=phase_acc, 1=phase_step, 2=volume)
 
     wire [7:0] ram_addr;
     wire [7:0] ram_do;
@@ -85,29 +101,38 @@ module wt3_core (
     wire [7:0] wave_do;
 
     // ============================================================
-    // Microcode decode
+    // Microcode decode (v1.3: 4 通道 TDM)
+    //   mc_ram_addr_full = {step[5:4] (通道号), mc_ram_sub_addr (通道内偏移)}
+    //   4-bit RAM 地址: 4 通道 × 4 字节 = 16 字节
     // ============================================================
-    assign ram_oe_n_mc   = ucode[7];
-    assign latch_a_n     = ucode[6];
-    assign latch_b_n     = ucode[5];
-    assign latch_c_n     = ucode[4];
-    assign latch_dac_clk = ucode[3];
-    assign mc_we_n       = ucode[2];
-    assign mc_ram_addr   = ucode[1:0];
+    assign ram_oe_n_mc     = ucode[7];
+    assign latch_a_n       = ucode[6];
+    assign latch_b_n       = ucode[5];
+    assign latch_c_n       = ucode[4];
+    assign latch_dac_clk   = ucode[3];
+    assign mc_we_n         = ucode[2];
+    assign mc_ram_sub_addr = ucode[1:0];
+
+    assign cur_channel = step[5:4];
+    assign cur_substep = step[3:0];
+
+    // RAM 完整地址 = {通道号 2 位, 通道内偏移 2 位}, 4-bit
+    //   通道 0-3 各占 4 字节: phase_acc, phase_step, volume, reserved
+    wire [3:0] mc_ram_addr_full = {step[5:4], mc_ram_sub_addr};
 
     // ============================================================
     // 157 #1: RAM 地址 mux 低 4 位
     //   Select=0 (SPFM) → reg_addr[3:0]
-    //   Select=1 (微码) → {mc_ram_addr[1:0], 2'b0} (2 位地址 + 2 位 0)
+    //   Select=1 (微码) → mc_ram_addr_full[3:0]
     // ============================================================
     wire mux1_y0, mux1_y1, mux1_y2, mux1_y3;
 
     hc157 u_addr_lo (
         .Select(SPFM_CS_n),
-        .A1(reg_addr[0]),     .B1(mc_ram_addr[0]),
-        .A2(reg_addr[1]),     .B2(mc_ram_addr[1]),
-        .A3(reg_addr[2]),     .B3(1'b0),
-        .A4(reg_addr[3]),     .B4(1'b0),
+        .A1(reg_addr[0]),     .B1(mc_ram_addr_full[0]),
+        .A2(reg_addr[1]),     .B2(mc_ram_addr_full[1]),
+        .A3(reg_addr[2]),     .B3(mc_ram_addr_full[2]),
+        .A4(reg_addr[3]),     .B4(mc_ram_addr_full[3]),
         .Enable_n(1'b0),
         .Y1(mux1_y0), .Y2(mux1_y1),
         .Y3(mux1_y2), .Y4(mux1_y3)
@@ -121,7 +146,7 @@ module wt3_core (
     // ============================================================
     // 157 #2: RAM 地址高 4 位
     //   Select=0 (SPFM) → reg_addr[7:4]
-    //   Select=1 (微码) → 0
+    //   Select=1 (微码) → 0 (4-bit 地址够用,高位不用)
     // ============================================================
     hc157 u_addr_hi (
         .Select(SPFM_CS_n),
@@ -205,11 +230,11 @@ module wt3_core (
     );
 
     // ============================================================
-    // 161: 5-bit step counter (32 steps)
+    // 161 ×2: 6-bit step counter (64 steps, 实际用 48 + 16 NOP)
     // ============================================================
     wire tc_lo;
     wire [3:0] step_lo;
-    wire step_hi;
+    wire [1:0] step_hi;
 
     hc161 u_step_lo (
         .MR(1'b1), .CP(STEP_CLK),
@@ -222,7 +247,7 @@ module wt3_core (
     hc161 u_step_hi (
         .MR(1'b1), .CP(STEP_CLK),
         .D0(1'b0), .D1(1'b0), .D2(1'b0), .D3(1'b0),
-        .Q0(step_hi), .Q1(), .Q2(), .Q3(),
+        .Q0(step_hi[0]), .Q1(step_hi[1]), .Q2(), .Q3(),
         .CEP(tc_lo), .CET(1'b1), .PE(1'b1), .TC()
     );
 
@@ -231,11 +256,11 @@ module wt3_core (
     // ============================================================
     // 微码 ROM (1 × 39SF040, 8-bit)
     // ============================================================
-    wire [18:0] mc_addr = {14'b0, step};
+    wire [18:0] mc_addr = {13'b0, step};
 
     hc39sf040 #(.INIT_FILE("rom/wt3_microcode.hex")) u_mc (
         .A0(mc_addr[0]),  .A1(mc_addr[1]),  .A2(mc_addr[2]),
-        .A3(mc_addr[3]),  .A4(mc_addr[4]),  .A5(1'b0),
+        .A3(mc_addr[3]),  .A4(mc_addr[4]),  .A5(mc_addr[5]),
         .A6(1'b0), .A7(1'b0),  .A8(1'b0), .A9(1'b0),
         .A10(1'b0), .A11(1'b0), .A12(1'b0), .A13(1'b0),
         .A14(1'b0), .A15(1'b0), .A16(1'b0), .A17(1'b0),

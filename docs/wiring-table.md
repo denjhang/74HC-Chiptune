@@ -1,9 +1,9 @@
-# WT3 WSG 单通道 + 音量 接线表（v1.2）
+# WT3 WSG 4 通道 TDM 接线表（v1.3）
 
 **生成日期**: 2026-06-14
-**版本**: v1.2（加 reg_c volume 寄存器）
+**版本**: v1.3（4 通道 TDM 数字混音）
 **核对来源**: [rtl/wt3_core.v](../rtl/wt3_core.v) + [rtl/wt3_spfm_bus.v](../rtl/wt3_spfm_bus.v) 实际 module 实例化
-**验证**: PASS（满档振幅 0xFF）+ 钢琴衰减包络 1.5s WAV
+**验证**: 4 通道 TDM 测试 PASS（5/5）
 
 ---
 
@@ -14,29 +14,30 @@
 | 1 | U1 | 74HC373 | DIP-20 | SPFM D[7:0] 透明锁存 | u_d_latch | spfm_bus.v:64 |
 | 2 | U2 | 74HC174 | DIP-16 | 同步器 (3+2 级 D-FF) | u_sync | spfm_bus.v:89 |
 | 3 | U3 | 74HC377 | DIP-20 | SPFM 地址寄存器 | u_addr_reg | spfm_bus.v:116 |
-| 4 | U4 | 74HC377 | DIP-20 | reg_a（phase_acc 锁存） | u_reg_a | core.v:261 |
-| 5 | U5 | 74HC377 | DIP-20 | reg_b（phase_step 锁存） | u_reg_b | core.v:271 |
-| 6 | U6 | 74HC377 | DIP-20 | **reg_c（volume 锁存）** | u_reg_c | core.v:281 |
-| 7 | U7 | 74HC161 | DIP-16 | step_lo (step[3:0]) | u_step_lo | core.v:208 |
-| 8 | U8 | 74HC161 | DIP-16 | step_hi (step[4]) | u_step_hi | core.v:216 |
-| 9 | U9 | 39SF040 | DIP-32 | 微码 ROM（32 字节有效） | u_mc | core.v:230 |
-| 10 | U10 | 39SF040 | DIP-32 | wavetable ROM（4KB = 16×256） | u_wave | core.v:307 |
-| 11 | U11 | 74HC157 | DIP-16 | RAM 地址 mux 低 4 位 | u_addr_lo | core.v:99 |
-| 12 | U12 | 74HC157 | DIP-16 | RAM 地址 mux 高 4 位 | u_addr_hi | core.v:120 |
-| 13 | U13 | 74HC157 | DIP-16 | RAM DI mux 低 4 位 | u_di_lo | core.v:140 |
-| 14 | U14 | 74HC157 | DIP-16 | RAM DI mux 高 4 位 | u_di_hi | core.v:158 |
-| 15 | U15 | 74HC157 | DIP-16 | RAM WE/OE 选择 | u_we_oe_mux | core.v:177 |
-| 16 | U16 | CY62256 | DIP-28 | 参数 RAM（32KB, 仅用 3B） | u_ram | core.v:244 |
-| 17 | U17 | 74HC283 | DIP-16 | 加法器低 4 位 | u_adder_lo | core.v:285 |
-| 18 | U18 | 74HC283 | DIP-16 | 加法器高 4 位 | u_adder_hi | core.v:293 |
-| 19 | U19 | 74HC273 | DIP-20 | DAC 输出锁存（8-bit） | u_dac | core.v:324 |
+| 4 | U4 | 74HC377 | DIP-20 | reg_a（phase_acc 锁存） | u_reg_a | core.v:283 |
+| 5 | U5 | 74HC377 | DIP-20 | reg_b（phase_step 锁存） | u_reg_b | core.v:293 |
+| 6 | U6 | 74HC377 | DIP-20 | reg_c（volume 锁存） | u_reg_c | core.v:303 |
+| 7 | U7 | 74HC161 | DIP-16 | step_lo (step[3:0]) | u_step_lo | core.v:230 |
+| 8 | U8 | 74HC161 | DIP-16 | **step_hi (step[5:4])** ← v1.3: 6-bit | u_step_hi | core.v:238 |
+| 9 | U9 | 39SF040 | DIP-32 | **微码 ROM（64 字节，4 通道×16 step）** | u_mc | core.v:252 |
+| 10 | U10 | 39SF040 | DIP-32 | wavetable ROM（4KB = 16 vol×256 phase） | u_wave | core.v:340 |
+| 11 | U11 | 74HC157 | DIP-16 | RAM 地址 mux 低 4 位 | u_addr_lo | core.v:130 |
+| 12 | U12 | 74HC157 | DIP-16 | RAM 地址 mux 高 4 位 | u_addr_hi | core.v:151 |
+| 13 | U13 | 74HC157 | DIP-16 | RAM DI mux 低 4 位 | u_di_lo | core.v:171 |
+| 14 | U14 | 74HC157 | DIP-16 | RAM DI mux 高 4 位 | u_di_hi | core.v:180 |
+| 15 | U15 | 74HC157 | DIP-16 | RAM WE/OE 选择 | u_we_oe_mux | core.v:199 |
+| 16 | U16 | CY62256 | DIP-28 | 参数 RAM（32KB, v1.3 用 16B） | u_ram | core.v:266 |
+| 17 | U17 | 74HC283 | DIP-16 | 加法器低 4 位 | u_adder_lo | core.v:317 |
+| 18 | U18 | 74HC283 | DIP-16 | 加法器高 4 位 | u_adder_hi | core.v:325 |
+| 19 | U19 | 74HC273 | DIP-20 | DAC 输出锁存（8-bit, TDM 4 通道共享） | u_dac | core.v:358 |
 
 **外部元件（不计入 IC 数）**:
-- Y1: 3.08MHz 晶振（HC-49S 或 3225 SMD）
+- Y1: 3.072MHz 晶振（HC-49S 或 3225 SMD）
 - DAC: 8-bit R-2R 电阻网络（20kΩ/10kΩ 0.1%）
+- 低通滤波: RC 一阶（截止 ~5 kHz）+ 音频放大器（LM386 或类似）
 - C1-C19: 每片 IC 的 0.1μF 去耦
 
-**相比 v1.1**: +1 片 74HC377 (reg_c)，wavetable ROM 从 256B 扩到 4KB
+**相比 v1.2**: **0 新增 IC**。step 计数器从 5-bit 改 6-bit（U8 多用 1 个 Q）；微码 ROM 从 32B 扩到 64B（U9）；RAM 从 3B 扩到 16B（U16）。3.072MHz 主频不变。
 
 ---
 
@@ -46,7 +47,7 @@
 |------|------|------|
 | VCC | +5V | 电源 |
 | GND | 地 | 电源 |
-| STEP_CLK | 3.08MHz 主时钟（96kHz × 32 step） | Y1 晶振 |
+| STEP_CLK | 3.072MHz 主时钟（48kHz × 64 step） | Y1 晶振 |
 | SPFM_CLK | 10MHz（主机 SPFM 总线时钟） | 外部 CPU |
 | SPFM_RST_n | 复位（低有效） | 外部 CPU |
 | SPFM_D[7:0] | SPFM 数据总线 | 外部 CPU 驱动 |
@@ -84,34 +85,61 @@ bit 1-0: ram_addr[1:0]
 
 ---
 
-## 微码 32 步循环（8 步有效 + 24 NOP）
+## 微码 64 步循环（v1.3: 4 通道 × 16 step = 64 step）
 
-| step | ucode | 动作 |
-|------|-------|------|
-| 0 | 0x74 | OE=0, addr=0（读 RAM[0]=phase_acc） |
+每通道 16 step = 8 工作 + 8 NOP。4 通道分时复用数据通路。
+
+| step | ch | sub | ucode | 动作 |
+|------|----|----|-------|------|
+| 0-7 | 0 | 0-7 | 见下 | ch0 工作阶段 |
+| 8-15 | 0 | 8-15 | 0xF4 | ch0 NOP（SPFM 可在此写参数） |
+| 16-23 | 1 | 0-7 | 见下 | ch1 工作阶段 |
+| 24-31 | 1 | 8-15 | 0xF4 | ch1 NOP |
+| 32-39 | 2 | 0-7 | 见下 | ch2 工作阶段 |
+| 40-47 | 2 | 8-15 | 0xF4 | ch2 NOP |
+| 48-55 | 3 | 0-7 | 见下 | ch3 工作阶段 |
+| 56-63 | 3 | 8-15 | 0xF4 | ch3 NOP |
+
+每通道 8 个工作 step（sub 0-7）的微码：
+
+| sub | ucode | 动作 |
+|-----|-------|------|
+| 0 | 0x74 | OE=0, addr=0（读 chX.phase_acc） |
 | 1 | 0x34 | latch_a=0, OE=0, addr=0（U4 锁存） |
-| 2 | 0x75 | OE=0, addr=1（读 RAM[1]=phase_step） |
+| 2 | 0x75 | OE=0, addr=1（读 chX.phase_step） |
 | 3 | 0x55 | latch_b=0, OE=0, addr=1（U5 锁存） |
-| 4 | 0x76 | OE=0, addr=2（**读 RAM[2]=volume**） |
-| 5 | 0x66 | latch_c=0, OE=0, addr=2（**U6 锁存**） |
-| 6 | 0xF0 | mc_we_n=0, addr=0（写回加法结果到 RAM[0]） |
+| 4 | 0x76 | OE=0, addr=2（读 chX.volume） |
+| 5 | 0x66 | latch_c=0, OE=0, addr=2（U6 锁存） |
+| 6 | 0xF0 | mc_we_n=0, addr=0（写回加法结果） |
 | 7 | 0xFC | dac_clk 上升沿 → U19 锁存 wavetable 输出 |
-| 8-31 | 0xF4 | NOP |
 
-**注**: 32 步循环 = 96kHz 采样率（3.08MHz ÷ 32）
+**注**: 64 step 循环 = 48kHz 循环率（3.072MHz ÷ 64），每通道采样率 = 48kHz（TDM 复用）
 
 ---
 
-## RAM 内容（参数表）
+## RAM 内容（v1.3 参数表，16 字节）
 
-| RAM 地址 | 名称 | 写入者 | 说明 |
-|---------|------|--------|------|
-| 0x00 | phase_acc | 微码自动写回 | 相位累加值（CPU 一般不写） |
-| 0x01 | phase_step | CPU 写 | 频率参数 |
-| 0x02 | volume | CPU 写 | 音量参数（低 4 位有效） |
-| 0x03-0x7FFF | 未用 | - | 预留扩展 |
+| RAM 地址 | 通道 | 字段 | 写入者 | 说明 |
+|---------|------|------|--------|------|
+| 0x00 | ch0 | phase_acc | 微码自动写回 | 相位累加值（CPU 一般不写） |
+| 0x01 | ch0 | phase_step | CPU 写 | ch0 频率参数 |
+| 0x02 | ch0 | volume | CPU 写 | ch0 音量参数 |
+| 0x03 | ch0 | reserved | - | 预留 |
+| 0x04 | ch1 | phase_acc | 微码自动写回 | |
+| 0x05 | ch1 | phase_step | CPU 写 | ch1 频率参数 |
+| 0x06 | ch1 | volume | CPU 写 | ch1 音量参数 |
+| 0x07 | ch1 | reserved | - | 预留 |
+| 0x08 | ch2 | phase_acc | 微码自动写回 | |
+| 0x09 | ch2 | phase_step | CPU 写 | ch2 频率参数 |
+| 0x0A | ch2 | volume | CPU 写 | ch2 音量参数 |
+| 0x0B | ch2 | reserved | - | 预留 |
+| 0x0C | ch3 | phase_acc | 微码自动写回 | |
+| 0x0D | ch3 | phase_step | CPU 写 | ch3 频率参数 |
+| 0x0E | ch3 | volume | CPU 写 | ch3 音量参数 |
+| 0x0F | ch3 | reserved | - | 预留 |
+| 0x10-0x7FFF | 未用 | - | - | 预留扩展 |
 
-详见 [register-map.md](register-map.md)
+RAM 地址映射公式: `addr = channel × 4 + sub_addr`，详见 [register-map.md](register-map.md)
 
 ---
 
@@ -209,26 +237,30 @@ bit 1-0: ram_addr[1:0]
 | 16 | VDD | VCC |
 | 8 | GND | GND |
 
-### U8: 74HC161 — step_hi（[core.v:216](../rtl/wt3_core.v#L216)）
+### U8: 74HC161 — step_hi（[core.v:238](../rtl/wt3_core.v#L238)）
+
+v1.3: 6-bit step counter (U8 用 2 位 Q0=step[4], Q1=step[5])
 
 | Pin | 信号 | 连接到 |
 |-----|------|--------|
 | 1 | /MR | VCC |
 | 2 | CP | STEP_CLK |
 | 6 | Q0 | step[4] → U9.A4 |
+| 5 | Q1 | step[5] → U9.A5, U11.B1 (RAM addr mux 高 4 位选通道) |
 | 7 | CEP | tc_lo（U7.TC） |
 | 10 | CET | VCC |
 | 9 | /PE | VCC |
-| 11-13 | Q1-Q3 | (未用) |
+| 11-13 | Q2-Q3 | (未用) |
 | 15 | TC | (未用) |
 | 16 | VDD | VCC |
 
-### U9: 39SF040 — 微码 ROM（[core.v:230](../rtl/wt3_core.v#L230)）
+### U9: 39SF040 — 微码 ROM（[core.v:252](../rtl/wt3_core.v#L252)）
 
 | Pin | 信号 | 连接到 |
 |-----|------|--------|
 | 8-12 | A0-A4 | step[0:4]（U7.Q0-Q3, U8.Q0） |
-| 1-7, 24-31 | A5-A18 | GND |
+| 13 | A5 | **step[5]**（U8.Q1）← v1.3 新接 |
+| 1-7, 24-31 | A6-A18 | GND |
 | 13-15, 18-22 | DQ0-DQ7 | ucode[7:0]（控制字） |
 | 16 | VSS | GND |
 | 17 | WE_n | VCC |
@@ -396,7 +428,8 @@ bit 1-0: ram_addr[1:0]
 | SPFM_CS_n | 外部 CPU | U11-U15.Select |
 | SPFM_RST_n | 外部 CPU | U2./CLR, U19./MR |
 | step[0:3] | U7.Q0-Q3 | U9.A0-A3 |
-| step[4] | U8.Q0 | U9.A4 |
+| step[4] | U8.Q0 | U9.A4, U11.B2 (RAM 地址 mux 选通道) |
+| step[5] | U8.Q1 | U9.A5, U12.B1 (RAM 地址 mux 选通道) ← v1.3 新增 |
 | tc_lo | U7.TC | U8.CEP |
 | ucode[7] | U9.DQ7 | U15.B2 (ram_oe_n_mc) |
 | ucode[6] | U9.DQ6 | U4./Enable (latch_a_n) |
@@ -461,10 +494,11 @@ Generated wt3_piano.wav (1.562s)
 
 ---
 
-## v1.0 → v1.1 → v1.2 演进
+## v1.0 → v1.1 → v1.2 → v1.3 演进
 
 | 版本 | IC 数 | 改动 |
 |------|-------|------|
 | v1.0 | 17 | 初版单通道（隐藏 373/174 reg 模拟） |
 | v1.1 | 18 | 显式实例化 hc373 + hc174，hc273 重命名 |
-| **v1.2** | **19** | **+1 片 377 (reg_c volume)，wavetable 4KB，钢琴包络演示** |
+| v1.2 | 19 | +1 片 377 (reg_c volume)，wavetable 4KB，钢琴包络演示 |
+| **v1.3** | **19** | **0 新增 IC！4 通道 TDM 数字混音。step 计数器 5→6-bit，微码 32→64B，RAM 3→16B，采样率 96→48kHz/ch** |
