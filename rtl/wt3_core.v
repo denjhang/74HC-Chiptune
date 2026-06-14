@@ -114,7 +114,21 @@ module wt3_core (
     wire latch_b_hi_n = decode_y[7];   // step=7
     wire latch_c_n    = decode_y[9];   // step=9
     wire dac_clk_n    = decode_y[13];  // step=13 (低有效)
-    assign latch_dac  = ~dac_clk_n;    // 上升沿锁存 (output port)
+
+    // ============================================================
+    // 74HC04 — 六反相器 (1 片, 用 1 路: dac_clk_n → latch_dac)
+    //   反相 154 Y13 (低有效) 为上升沿, 送 U_dac (273) CP
+    // 其余 5 路未用, 接 GND
+    // (spfm_bus 内还有 1 片 hc04, 处理 addr_q3/data_q2 反相)
+    // ============================================================
+    hc04 u_inv (
+        .A1(dac_clk_n), .Y1(latch_dac),
+        .A2(1'b0),      .Y2(),
+        .A3(1'b0),      .Y3(),
+        .A4(1'b0),      .Y4(),
+        .A5(1'b0),      .Y5(),
+        .A6(1'b0),      .Y6()
+    );
 
     // ============================================================
     // 157 #1: RAM 地址 mux 低 4 位
@@ -252,7 +266,7 @@ module wt3_core (
     assign writeback_data = {wb_hi_out, wb_lo_mux};
 
     // ============================================================
-    // SPFM 总线 (3 IC: 373, 174, 377)
+    // SPFM 总线 (3 IC: 373, 174, 377) + 1 IC (74HC04 反相器)
     // ============================================================
     wt3_spfm_bus u_spfm (
         .CLK(SPFM_CLK), .RST_n(SPFM_RST_n),

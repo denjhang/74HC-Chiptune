@@ -8,6 +8,7 @@ OUT = os.path.join(ROOT, "wt3_wsg_v1.4_piano_cascade.zip")
 FILES = [
     "rtl/wt3_core.v",
     "rtl/wt3_spfm_bus.v",
+    "rtl/hc04.v",
     "rtl/hc154.v",
     "rtl/hc157.v",
     "rtl/hc161.v",
@@ -25,6 +26,7 @@ FILES = [
     "rom/gen_wt3_wavetable.py",
     "rom/wt3_csv2wav.py",
     "docs/wt3-architecture.md",
+    "docs/wiring-table-v14.md",
     "docs/cmos-synth-3786.md",
     "docs/hc-chiptune-design.md",
     "docs/wiring-table.md",

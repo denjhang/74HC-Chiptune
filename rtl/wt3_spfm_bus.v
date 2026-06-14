@@ -38,9 +38,11 @@ module wt3_spfm_bus (
     input  wire        WR_n,
     input  wire        RD_n,
 
-    // 内部寄存器输出 (低有效)
+    // 内部寄存器输出
     output wire [7:0]  reg_addr,
     output wire [7:0]  reg_data,
+
+    // 写脉冲 (低有效, 由 74HC04 反相 174 同步链输出得到)
     output wire        addr_wr_pulse_n,
     output wire        data_wr_pulse_n
 );
@@ -103,9 +105,20 @@ module wt3_spfm_bus (
         .Q6()                // Pin 10 未用
     );
 
-    // 外部协议译码: 取反输出 (低有效脉冲)
-    assign addr_wr_pulse_n = ~addr_q3;
-    assign data_wr_pulse_n = ~data_q2;
+    // ============================================================
+    // 74HC04 — 六反相器 (声卡内部: 174 同步链 Q 反相 → 低有效脉冲)
+    //   Y1 = ~addr_q3 → addr_wr_pulse_n (送 u_addr_reg/377 /Enable)
+    //   Y2 = ~data_q2 → data_wr_pulse_n (送外部 u_we_oe_mux/157 A1)
+    // 其余 4 路未用, 接 GND
+    // ============================================================
+    hc04 u_inv_spfm (
+        .A1(addr_q3), .Y1(addr_wr_pulse_n),
+        .A2(data_q2), .Y2(data_wr_pulse_n),
+        .A3(1'b0),    .Y3(),
+        .A4(1'b0),    .Y4(),
+        .A5(1'b0),    .Y5(),
+        .A6(1'b0),    .Y6()
+    );
 
     // ============================================================
     // U3: 74HC377 — 地址寄存器
