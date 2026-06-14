@@ -29,3 +29,55 @@ rom/__pycache__/
 
 # Reference binaries (kept, not tracked if huge)
 # reference/*/  # user-added, manual
+
+# Intermediate / scratch sim outputs (not the headline artifact)
+wt3_sine.csv
+wt3_sine.wav
+wt3_sine2.wav
+wt3_cascade.wav
+wt3_cascade2.wav
+wt3_chord.wav
+wt3_chord2.wav
+wt_synth_output.csv
+wt_synth_output.wav
+sim_output.txt
+sim_out.txt
+sim_commands.txt
+compile_output.txt
+compile_wt3.log
+test_tool_output.txt
+
+# Scratch debug testbenches (not part of v1.4 release)
+tb/debug_*.v
+tb/wt3_debug_tb.v
+tb/check_x.v
+tb/test_timing.v
+tb/wt_top_internal_debug.v
+tb/wt_top_norom.v
+tb/wt_top_debug_tb.v
+tb/wt_ram_debug_tb.v
+tb/wt_ram_debug2_tb.v
+tb/wt_ram_ch2_tb.v
+tb/wt_ram_rom_tb.v
+tb/wt_rom_dual_tb.v
+tb/wt_accum_tb.v
+tb/wt_chips_tb.v
+tb/wt_fsm_tb.v
+tb/wt_hw_fsm_tb.v
+tb/wt_wsg_tb.v
+tb/wt_7134_tb.v
+tb/wt3_tb.v
+tb/wt_synth_tb.v
+
+# Local-only helper scripts
+run_sim.bat
+compile_wt3.bat
+test_tool.bat
+sim_run.sh
+compile_wt3.log
+
+# Old reference archives (kept local, not tracked)
+reference/
+iverilog-install/
+sq_top_src.zip
+wt3_piano.csv

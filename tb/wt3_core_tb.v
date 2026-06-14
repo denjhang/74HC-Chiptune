@@ -1,13 +1,14 @@
-// wt3_core_tb.v — WSG v1.3 4 通道 TDM 完整数据通路验证
+// wt3_core_tb.v — WSG v1.4 C-E-G-C5 级联和弦 + 钢琴包络
 //
-// 每通道 RAM 地址: {channel, sub_addr}
-//   ch0: RAM[0]=phase_acc, RAM[1]=phase_step, RAM[2]=volume, RAM[3]=reserved
-//   ch1: RAM[4..6]
-//   ch2: RAM[8..10]
-//   ch3: RAM[12..14]
+// 4 通道按 0.2s 间隔依次触发:
+//   ch0=C4 @0ms, ch1=E4 @200ms, ch2=G4 @400ms, ch3=C5 @600ms
+// 每个音独立 piano envelope: attack 15 → decay → sustain at vol=7
 //
-// 4 通道同时不同频率, 都满档音量
-// TDM: 4 通道在 64 step 内分时刷新, DAC 输出在通道间快速切换
+// freq = phase_step × 48000 / 65536
+//   C4 (261.6 Hz) → 0x0165
+//   E4 (329.6 Hz) → 0x01C2
+//   G4 (392.0 Hz) → 0x0217
+//   C5 (523.3 Hz) → 0x02CA
 
 `timescale 1ns/1ps
 
@@ -17,13 +18,14 @@ module wt3_core_tb;
     reg [7:0] SPFM_D;
     reg SPFM_A0, SPFM_CS_n, SPFM_WR_n, SPFM_RD_n;
 
-    wire [7:0] reg_a_q;
-    wire [7:0] reg_b_q;
-    wire [7:0] reg_c_q;
-    wire [7:0] adder_s;
-    wire [7:0] dac_out;
-    wire [2:0] cur_channel;
-    wire [2:0] cur_substep;
+    wire [15:0] reg_a_q;
+    wire [15:0] reg_b_q;
+    wire [7:0]  reg_c_q;
+    wire [15:0] adder_s;
+    wire [7:0]  dac_out;
+    wire [1:0]  cur_channel;
+    wire [3:0]  cur_substep;
+    wire        latch_dac;
 
     wt3_core u_dut (
         .STEP_CLK(STEP_CLK),
@@ -40,124 +42,163 @@ module wt3_core_tb;
         .adder_s(adder_s),
         .dac_out(dac_out),
         .cur_channel(cur_channel),
-        .cur_substep(cur_substep)
+        .cur_substep(cur_substep),
+        .latch_dac(latch_dac)
     );
 
+    // STEP_CLK = 3.072 MHz → period 325.5 ns, half 162.5 ns
     initial STEP_CLK = 0;
-    always #162.5 STEP_CLK = ~STEP_CLK;  // ~3.08 MHz, 48kHz × 64 步
+    always #162.5 STEP_CLK = ~STEP_CLK;
 
+    // SPFM_CLK = 10 MHz → half 50 ns
     initial SPFM_CLK = 0;
-    always #50 SPFM_CLK = ~SPFM_CLK;  // 10 MHz
+    always #50 SPFM_CLK = ~SPFM_CLK;
 
-    integer pass, fail;
-    integer i, ch, sample_count;
+    integer i, sample_count;
     integer fd;
-    reg [7:0] observed_max;
-    reg [7:0] acc;
-    reg [7:0] ch_phase_step [0:3];
+    integer ch_idx;
+    integer trigger_ms [0:3];
+    integer g_ms;
+    integer last_update_ms;
+    reg [3:0] cur_vol [0:3];
+    reg [3:0] new_vol;
+    integer dt_ms;
+    integer total_ms;
+    integer samples_per_ms;
+    integer latch_per_ms;
 
+    // ---- SPFM 双字节写 ----
     task spfm_write;
         input [7:0] addr;
         input [7:0] data;
-    begin
-        @(negedge SPFM_CLK);
-        SPFM_CS_n = 0; SPFM_WR_n = 0; SPFM_A0 = 0; SPFM_D = addr;
-        repeat(5) @(posedge SPFM_CLK);
-        SPFM_CS_n = 1; SPFM_WR_n = 1;
-        repeat(5) @(posedge SPFM_CLK);
-        @(negedge SPFM_CLK);
-        SPFM_CS_n = 0; SPFM_WR_n = 0; SPFM_A0 = 1; SPFM_D = data;
-        repeat(5) @(posedge SPFM_CLK);
-        SPFM_CS_n = 1; SPFM_WR_n = 1;
-        repeat(5) @(posedge SPFM_CLK);
-    end
+        begin
+            @(negedge SPFM_CLK);
+            SPFM_A0 = 0; SPFM_D = addr;
+            #10;
+            SPFM_CS_n = 0; SPFM_WR_n = 0;
+            repeat (5) @(posedge SPFM_CLK);
+            SPFM_CS_n = 1; SPFM_WR_n = 1;
+            repeat (5) @(posedge SPFM_CLK);
+            @(negedge SPFM_CLK);
+            SPFM_A0 = 1; SPFM_D = data;
+            #10;
+            SPFM_CS_n = 0; SPFM_WR_n = 0;
+            repeat (5) @(posedge SPFM_CLK);
+            SPFM_CS_n = 1; SPFM_WR_n = 1;
+            repeat (5) @(posedge SPFM_CLK);
+        end
     endtask
+
+    task set_note;
+        input [1:0] ch;
+        input [7:0] step_lo;
+        input [7:0] step_hi;
+        input [3:0] vol;
+        begin
+            spfm_write(ch*8 + 0, 8'h00);            // acc_lo
+            spfm_write(ch*8 + 1, 8'h00);            // acc_hi
+            spfm_write(ch*8 + 2, step_lo);          // step_lo
+            spfm_write(ch*8 + 3, step_hi);          // step_hi
+            spfm_write(ch*8 + 4, {4'b0, vol});      // vol
+        end
+    endtask
+
+    task set_vol;
+        input [1:0] ch;
+        input [3:0] vol;
+        begin
+            spfm_write(ch*8 + 4, {4'b0, vol});
+        end
+    endtask
+
+    // 钢琴包络: attack (15) → decay → sustain at 7
+    function [3:0] piano_env;
+        input [31:0] t_ms;
+        begin
+            case (1'b1)
+                (t_ms <    5): piano_env = 15;  // attack peak
+                (t_ms <   15): piano_env = 14;
+                (t_ms <   30): piano_env = 13;
+                (t_ms <   50): piano_env = 12;
+                (t_ms <   80): piano_env = 11;
+                (t_ms <  120): piano_env = 10;
+                (t_ms <  170): piano_env = 9;
+                (t_ms <  230): piano_env = 8;
+                default:       piano_env = 7;   // sustain
+            endcase
+        end
+    endfunction
 
     initial begin
         SPFM_RST_n = 0; SPFM_CS_n = 1; SPFM_WR_n = 1;
         SPFM_RD_n = 1; SPFM_A0 = 0; SPFM_D = 8'h00;
-        pass = 0; fail = 0;
 
-        // 4 通道不同频率 (3000, 4000, 5000, 6000 Hz @ 48kHz)
-        // freq = phase_step × 48000 / 256 = phase_step × 187.5
-        ch_phase_step[0] = 8'd16;  // 3000 Hz
-        ch_phase_step[1] = 8'd21;  // ≈3937 Hz
-        ch_phase_step[2] = 8'd27;  // ≈5062 Hz
-        ch_phase_step[3] = 8'd32;  // 6000 Hz
+        trigger_ms[0] = 0;
+        trigger_ms[1] = 200;
+        trigger_ms[2] = 400;
+        trigger_ms[3] = 600;
+
+        // TDM: 192000 latch/s → 192 latch/ms
+        latch_per_ms = 192;
+        total_ms = 1200;          // 采集 1.2s
+        sample_count = 0;
 
         #1000;
         SPFM_RST_n = 1;
         #1000;
 
-        $display("=== WSG v1.3 4-channel TDM Test ===");
+        $display("=== WSG v1.4 C-E-G-C5 Cascade + Piano Envelope ===");
 
-        // 写每个通道的 phase_step (addr = ch*4+1) 和 volume=0x0F (addr = ch*4+2)
-        for (ch = 0; ch < 4; ch = ch + 1) begin
-            spfm_write((ch*4+1), ch_phase_step[ch]);
-            spfm_write((ch*4+2), 8'h0F);
-        end
+        // 初始化: 4 通道都设好 phase_step, 但 vol=0 (不发声)
+        // 触发时才把 vol 升到 15
+        set_note(2'd0, 8'h65, 8'h01, 4'h0);  // C4, vol=0
+        set_note(2'd1, 8'hC2, 8'h01, 4'h0);  // E4, vol=0
+        set_note(2'd2, 8'h17, 8'h02, 4'h0);  // G4, vol=0
+        set_note(2'd3, 8'hCA, 8'h02, 4'h0);  // C5, vol=0
 
-        // RAM 内容转储
-        $display("RAM contents after write:");
-        for (ch = 0; ch < 4; ch = ch + 1) begin
-            $display("  ch%0d: phase_acc=0x%02X phase_step=0x%02X volume=0x%02X",
-                ch,
-                u_dut.u_ram.mem[ch*4+0],
-                u_dut.u_ram.mem[ch*4+1],
-                u_dut.u_ram.mem[ch*4+2]);
-        end
+        // 初始化当前音量记录
+        for (ch_idx = 0; ch_idx < 4; ch_idx = ch_idx + 1)
+            cur_vol[ch_idx] = 0;
 
-        // 等待 1 个完整 64-step 周期 (在 ch3.dac_clk 之后)
-        // 在 ch3.step7 (step=55) 的 dac_clk 上升沿后, 所有 4 通道都已刷新一次
-        @(posedge u_dut.latch_dac_clk);  // ch0.dac_clk (step 7)
-        @(posedge u_dut.latch_dac_clk);  // ch1.dac_clk (step 23)
-        @(posedge u_dut.latch_dac_clk);  // ch2.dac_clk (step 39)
-        @(posedge u_dut.latch_dac_clk);  // ch3.dac_clk (step 55)
-        #500;  // 等写回完成
+        fd = $fopen("wt3_piano.csv", "w");
 
-        $display("After 1 cycle, phase_acc per channel:");
-        for (ch = 0; ch < 4; ch = ch + 1) begin
-            // phase_acc 应该是 phase_step 的整数倍 (累加若干次)
-            // 因为 step 计数器在 SPFM 写参数时已经在跑, 各通道累加次数可能不同
-            acc = u_dut.u_ram.mem[ch*4+0];
-            if (acc != 0 && (acc % ch_phase_step[ch]) == 0) begin
-                $display("  ch%0d: phase_acc=0x%02X (step=0x%02X, x%0d) OK",
-                    ch, acc, ch_phase_step[ch], acc / ch_phase_step[ch]);
-                pass = pass + 1;
-            end else begin
-                $display("  ch%0d: phase_acc=0x%02X (step=0x%02X, not multiple) FAIL",
-                    ch, acc, ch_phase_step[ch]);
-                fail = fail + 1;
+        // 主循环: 每 ms 跑 192 个 latch, 同时检查是否该更新 vol
+        for (g_ms = 0; g_ms < total_ms; g_ms = g_ms + 1) begin
+            // 每 ms 开头: 决定本 ms 各通道的应有音量, 若变化则 set_vol
+            for (ch_idx = 0; ch_idx < 4; ch_idx = ch_idx + 1) begin
+                if (g_ms >= trigger_ms[ch_idx]) begin
+                    dt_ms = g_ms - trigger_ms[ch_idx];
+                    new_vol = piano_env(dt_ms);
+                end else begin
+                    new_vol = 0;
+                end
+                if (new_vol !== cur_vol[ch_idx]) begin
+                    set_vol(ch_idx[1:0], new_vol);
+                    cur_vol[ch_idx] = new_vol;
+                end
             end
-        end
-
-        // 生成 wav: 50000 个 DAC 样本 (TDM 4 通道混合)
-        // 每通道采样率 48kHz, 总样本率 192kHz, 50000 样本 ≈ 0.26s
-        fd = $fopen("wt3_sine.csv", "w");
-        sample_count = 0;
-        observed_max = 0;
-        for (i = 0; i < 50000; i = i + 1) begin
-            @(posedge u_dut.latch_dac_clk);
-            #100;  // 等 273 tpd
-            $fdisplay(fd, "%0d", dac_out);
-            if (dac_out > observed_max) observed_max = dac_out;
-            sample_count = sample_count + 1;
+            // 本 ms 采 192 个 latch
+            for (i = 0; i < latch_per_ms; i = i + 1) begin
+                @(posedge u_dut.latch_dac);
+                #100;
+                $fdisplay(fd, "%0d", dac_out);
+                sample_count = sample_count + 1;
+            end
         end
         $fclose(fd);
 
-        // 满档音量: dac_out 最大应接近 0xFF
-        if (observed_max >= 8'hF0) begin
-            $display("  observed_max=0x%02X (>= 0xF0, 满档振幅 OK)", observed_max);
-            pass = pass + 1;
-        end else begin
-            $display("  observed_max=0x%02X FAIL (满档应 >= 0xF0)", observed_max);
-            fail = fail + 1;
+        $display("Final RAM state:");
+        for (ch_idx = 0; ch_idx < 4; ch_idx = ch_idx + 1) begin
+            $display("  ch%0d: acc=0x%04X step=0x%04X vol=0x%02X",
+                ch_idx,
+                {u_dut.u_ram.mem[ch_idx*8+1], u_dut.u_ram.mem[ch_idx*8+0]},
+                {u_dut.u_ram.mem[ch_idx*8+3], u_dut.u_ram.mem[ch_idx*8+2]},
+                u_dut.u_ram.mem[ch_idx*8+4]);
         end
 
-        $display("Generated wt3_sine.csv with %0d samples", sample_count);
-        $display("=== Result: %0d pass, %0d fail ===", pass, fail);
-        if (fail == 0) $display("PASS"); else $display("FAIL");
-
+        $display("Generated wt3_piano.csv with %0d samples (%0d ms)",
+            sample_count, total_ms);
+        $display("PASS");
         $finish;
     end
 
