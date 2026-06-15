@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 // wt_rom_tb.v — 128点 4通道 WT 合成器 testbench
-// 对齐 STC32G wt.c: phase[11:5]&0x7F, step=freq*8192/32051
+// 对齐 STC32G wt.c: phase[12:6]&0x7F, step=freq*8192/32051
 // 6波形(sqr/sq12/sq25/sine/saw/noise), 16level, 32vol
 // 架构: 查表累加器, 39SF040(ROM) + 62256(RAM) + 2×74283(ALU)
 module wt_rom_tb;
@@ -56,7 +56,7 @@ always @(posedge clk) begin
                 // phase 累加
                 phase[ch] = phase[ch] + step_val[ch];
                 // ROM 查表
-                rom_addr = {wave_idx[ch], level[ch], vol[ch], phase[ch][11:5]};
+                rom_addr = {wave_idx[ch], level[ch], vol[ch], phase[ch][12:6]};
                 ch_out[ch] = $signed(rom_data[rom_addr]);
                 // 混音
                 dac_out = dac_out + ch_out[ch];

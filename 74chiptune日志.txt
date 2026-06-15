@@ -1,5 +1,22 @@
 
 
+D:\working\vscode-projects\74HC-Chiptune\reference\Namco WSG\easyeda
+
+D:\working\vscode-projects\74HC-Chiptune\reference\Namco WSG\rom
+
+具体功能文档 ：
+D:\working\vscode-projects\74HC-Chiptune\reference\Namco WSG\Pac-Man技术文档_extracted
+D:\working\vscode-projects\74HC-Chiptune\reference\Namco WSG\PacmanEmulation_extracted
+
+
+
+
+
+
+
+
+
+
 跑0.5s，不对，有没有更快的方法？你先确认正常我再听
 
 

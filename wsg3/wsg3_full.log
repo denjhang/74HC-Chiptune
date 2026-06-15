@@ -1,0 +1,169 @@
+=== WSG3 Functional Test ===
+VCD info: dumpfile wsg3_func.vcd opened for output.
+t=0: u6 mem[0]=0000 u7 mem[0]=0000 u6_we_n=x u7_we_n=1 spfm_write_active=0 RST_n=0
+t=1: u6 mem[0]=0000 u7 mem[0]=0000 u6_we_n=x u7_we_n=1 spfm_write_active=0
+After RST=0: hc174.q_reg=000000 acc=1111 freq=1111 adder_s=1110 c4=1
+  u6 mem[0]=0000 u6_do_inv=1111 u6_cs_n=0 u6_we_n=0
+  Before RST release: adder_s=1110 c4=1 carry=000000 D1=0 D2=0 D3=1 D4=1 D5=1 D6=1
+  RST released +10ns: hc174.q=000000 carry=000000 adder_s=1110 acc=1111 u6_do_inv=1111 u7_do_inv=1111 ram_din=0001
+    u6.mem[0]=0000 addr=0000 O0=1 O1=1 O2=1 O3=1
+    hc174.D1=0 D2=0 D3=1 D4=1 D5=1 D6=1
+    hc174.Q1=0 Q2=0 Q3=0 Q4=0 Q5=0 Q6=0
+    u6 mem[0]=0000 u6_do_inv=1111 u6_we_n=0 ram_din_inv=0001 spfm_write_active=0
+    hc283: A=1111 B=1111 C0=0 S=1110 C4=1
+    acc_dout=1111 freq_dout=1111
+  AfterRST k=0 RSTn=1 hcnt=01 tdm_step=0 phase0=0 acc_we=1 clr174=1 clk174=0 rom3m=0c acc=1111 freq=1111 adder_s=1111 c4=1 carry=111100 hc174.q=111100 hc174.D=111111
+  AfterRST k=1 RSTn=1 hcnt=02 tdm_step=0 phase0=0 acc_we=1 clr174=1 clk174=0 rom3m=0c acc=1111 freq=1111 adder_s=1111 c4=1 carry=111100 hc174.q=111100 hc174.D=111111
+  AfterRST k=2 RSTn=1 hcnt=03 tdm_step=0 phase0=0 acc_we=1 clr174=1 clk174=0 rom3m=0c acc=1111 freq=1111 adder_s=1111 c4=1 carry=111100 hc174.q=111100 hc174.D=111111
+  AfterRST k=3 RSTn=1 hcnt=04 tdm_step=1 phase0=1 acc_we=1 clr174=1 clk174=1 rom3m=0c acc=1111 freq=1111 adder_s=1111 c4=1 carry=111111 hc174.q=111111 hc174.D=111111
+  AfterRST k=4 RSTn=1 hcnt=05 tdm_step=1 phase0=0 acc_we=1 clr174=1 clk174=0 rom3m=0c acc=1111 freq=1111 adder_s=1111 c4=1 carry=111111 hc174.q=111111 hc174.D=111111
+  AfterRST k=5 RSTn=1 hcnt=06 tdm_step=1 phase0=0 acc_we=1 clr174=1 clk174=0 rom3m=0c acc=1111 freq=1111 adder_s=1111 c4=1 carry=111111 hc174.q=111111 hc174.D=111111
+  AfterRST k=6 RSTn=1 hcnt=07 tdm_step=1 phase0=0 acc_we=1 clr174=1 clk174=0 rom3m=0c acc=1111 freq=1111 adder_s=1111 c4=1 carry=111111 hc174.q=111111 hc174.D=111111
+  AfterRST k=7 RSTn=1 hcnt=08 tdm_step=2 phase0=1 acc_we=1 clr174=1 clk174=1 rom3m=0c acc=1111 freq=1111 adder_s=1111 c4=1 carry=111111 hc174.q=111111 hc174.D=111111
+Writing Voice 1 frequency = 0x12C6 (A4=440Hz)
+  spfm_write(0x50, 0x06) hcnt 08→0f carry=xxxxxx
+  spfm_write(0x51, 0x0c) hcnt 0f→17 carry=xxxxxx
+  spfm_write(0x52, 0x02) hcnt 17→1f carry=xxxxxx
+  spfm_write(0x53, 0x01) hcnt 1f→27 carry=xxxxxx
+  spfm_write(0x54, 0x00) hcnt 27→2f carry=xxxxxx
+Writing Voice 1 volume = 15
+  spfm_write(0x55, 0x0f) hcnt 2f→37 carry=xxxxxx
+Writing Voice 1 waveform = 0 (sine)
+  spfm_write(0x45, 0x00) hcnt 37→3f carry=xxxxxx
+Setup complete, carry=xxxxxx hcnt=3f
+
+=== Internal State After Setup ===
+reg_addr = 0x45
+reg_data = 0x00
+hcnt = 0x3f tdm_step=15 (time=57536000)
+acc_dout = 0xf (u6_do_inv=1111)
+freq_dout = 0xf (u7_do_inv=1111)
+ram_addr = 0xf
+U6 mem[5]=1111 U7 mem[5]=0000
+carry_chain (1L) = 0xxx
+adder_s = 0xx  adder_c4=x
+u3_acc_we_en=0 u3_clr174_n=1 u3_cp273_en=1
+rom3m_data = 0x06 (addr bits: A3=1 A2=1 A1=1 A0=1)
+u_u3.mem[0..F] = 0c 0c 0c 0c 0c 06 0c 0c 0c 0c 06 0c 0c 0c 0c 06
+rom1m_data = 0xxx
+u11_q (273 out) = 0xfx
+
+=== U6 (acc RAM) Content ===
+  U6[0] = 1111
+  U6[1] = 1110
+  U6[2] = 1101
+  U6[3] = 1100
+  U6[4] = 0000
+  U6[5] = 1111
+  U6[6] = 0000
+  U6[7] = 0000
+  U6[8] = 0000
+  U6[9] = 0000
+  U6[10] = 0000
+  U6[11] = 0000
+  U6[12] = 0000
+  U6[13] = 0000
+  U6[14] = 0000
+  U6[15] = 0000
+=== U7 (freq RAM) Content ===
+  U7[0] = 1001
+  U7[1] = 0011
+  U7[2] = 1101
+  U7[3] = 1110
+  U7[4] = 1111
+  U7[5] = 0000
+  U7[6] = 0000
+  U7[7] = 0000
+  U7[8] = 0000
+  U7[9] = 0000
+  U7[10] = 0000
+  U7[11] = 0000
+  U7[12] = 0000
+  U7[13] = 0000
+  U7[14] = 0000
+  U7[15] = 0000
+
+Setup complete, running 50000 cycles (~0.5 sec audio)...
+
+=== First TDM cycle detail (ch0 ch1 ch2) ===
+  warmup i=0 hcnt=01 phase0=0 carry=xxxxxx clk174=0 clr=1 acc=xxxx freq=0110 adder_s=xxxx mem[step]=xxxx D=xxxxxx
+  warmup i=1 hcnt=02 phase0=0 carry=xxxxxx clk174=0 clr=1 acc=xxxx freq=0110 adder_s=xxxx mem[step]=xxxx D=xxxxxx
+  warmup i=2 hcnt=03 phase0=0 carry=xxxxxx clk174=0 clr=1 acc=xxxx freq=0110 adder_s=xxxx mem[step]=xxxx D=xxxxxx
+  warmup i=3 hcnt=04 phase0=1 carry=xxxxxx clk174=1 clr=1 acc=0001 freq=1100 adder_s=xxxx mem[step]=1110 D=xxxxxx
+  warmup i=4 hcnt=05 phase0=0 carry=xxxxxx clk174=0 clr=1 acc=0001 freq=1100 adder_s=xxxx mem[step]=1110 D=xxxxxx
+  warmup i=5 hcnt=06 phase0=0 carry=xxxxxx clk174=0 clr=1 acc=0001 freq=1100 adder_s=xxxx mem[step]=1110 D=xxxxxx
+  warmup i=6 hcnt=07 phase0=0 carry=xxxxxx clk174=0 clr=1 acc=0001 freq=1100 adder_s=xxxx mem[step]=1110 D=xxxxxx
+  warmup i=7 hcnt=08 phase0=1 carry=xxxxxx clk174=1 clr=1 acc=0010 freq=0010 adder_s=xxxx mem[step]=1101 D=xxxxxx
+After 64 cycles warmup: carry=xxxxxx hcnt=00
+  u6.mem[0..5]=xxxx xxxx xxxx xxxx xxxx 1111
+  i=0 hcnt=01 step=0 phase0=0 acc=xxxx freq=0110 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=1 hcnt=02 step=0 phase0=0 acc=xxxx freq=0110 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=2 hcnt=03 step=0 phase0=0 acc=xxxx freq=0110 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=3 hcnt=04 step=1 phase0=1 acc=xxxx freq=1100 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=1 clr=1 wr_active=0
+  i=4 hcnt=05 step=1 phase0=0 acc=xxxx freq=1100 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=5 hcnt=06 step=1 phase0=0 acc=xxxx freq=1100 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=6 hcnt=07 step=1 phase0=0 acc=xxxx freq=1100 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=7 hcnt=08 step=2 phase0=1 acc=xxxx freq=0010 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=1 clr=1 wr_active=0
+  i=8 hcnt=09 step=2 phase0=0 acc=xxxx freq=0010 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=12 hcnt=0d step=3 phase0=0 acc=xxxx freq=0001 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=16 hcnt=11 step=4 phase0=0 acc=xxxx freq=0000 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=20 hcnt=15 step=5 phase0=0 acc=0000 freq=1111 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=24 hcnt=19 step=6 phase0=0 acc=xxxx freq=1111 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=28 hcnt=1d step=7 phase0=0 acc=xxxx freq=1111 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=32 hcnt=21 step=8 phase0=0 acc=xxxx freq=1111 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=36 hcnt=25 step=9 phase0=0 acc=xxxx freq=1111 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=40 hcnt=29 step=10 phase0=0 acc=1111 freq=1111 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=44 hcnt=2d step=11 phase0=0 acc=xxxx freq=1111 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=48 hcnt=31 step=12 phase0=0 acc=xxxx freq=1111 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=52 hcnt=35 step=13 phase0=0 acc=xxxx freq=1111 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=56 hcnt=39 step=14 phase0=0 acc=xxxx freq=1111 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  i=60 hcnt=3d step=15 phase0=0 acc=1111 freq=1111 adder_s=xxxx c4=x carry=xxxxxx D=xxxxxx clk174=0 clr=1 wr_active=0
+  Cyc 0 hcnt=00 step=0 acc=xxxx freq=0110 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cycle 0: DAC = 0xxx
+  Cyc 1 hcnt=01 step=0 acc=xxxx freq=0110 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 2 hcnt=02 step=0 acc=xxxx freq=0110 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 3 hcnt=03 step=0 acc=xxxx freq=0110 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 4 hcnt=04 step=1 acc=xxxx freq=1100 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 5 hcnt=05 step=1 acc=xxxx freq=1100 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 6 hcnt=06 step=1 acc=xxxx freq=1100 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 7 hcnt=07 step=1 acc=xxxx freq=1100 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 8 hcnt=08 step=2 acc=xxxx freq=0010 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 9 hcnt=09 step=2 acc=xxxx freq=0010 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 10 hcnt=0a step=2 acc=xxxx freq=0010 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 11 hcnt=0b step=2 acc=xxxx freq=0010 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 12 hcnt=0c step=3 acc=xxxx freq=0001 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 13 hcnt=0d step=3 acc=xxxx freq=0001 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 14 hcnt=0e step=3 acc=xxxx freq=0001 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 15 hcnt=0f step=3 acc=xxxx freq=0001 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 16 hcnt=10 step=4 acc=xxxx freq=0000 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 17 hcnt=11 step=4 acc=xxxx freq=0000 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 18 hcnt=12 step=4 acc=xxxx freq=0000 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 19 hcnt=13 step=4 acc=xxxx freq=0000 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 20 hcnt=14 step=5 acc=0000 freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=0 clr174=1 cp273=1
+  Cyc 21 hcnt=15 step=5 acc=0000 freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=0 clr174=1 cp273=1
+  Cyc 22 hcnt=16 step=5 acc=0000 freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=0 clr174=1 cp273=1
+  Cyc 23 hcnt=17 step=5 acc=0000 freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=0 clr174=1 cp273=1
+  Cyc 24 hcnt=18 step=6 acc=xxxx freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 25 hcnt=19 step=6 acc=xxxx freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 26 hcnt=1a step=6 acc=xxxx freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 27 hcnt=1b step=6 acc=xxxx freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 28 hcnt=1c step=7 acc=xxxx freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 29 hcnt=1d step=7 acc=xxxx freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 30 hcnt=1e step=7 acc=xxxx freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cyc 31 hcnt=1f step=7 acc=xxxx freq=1111 adder_s=xxxx adder_c4=x carry=xxxxxx acc_we=1 clr174=1 cp273=0
+  Cycle 5000: DAC = 0xxx
+  Cycle 10000: DAC = 0xxx
+  Cycle 15000: DAC = 0xxx
+  Cycle 20000: DAC = 0xxx
+  Cycle 25000: DAC = 0xxx
+  Cycle 30000: DAC = 0xxx
+  Cycle 35000: DAC = 0xxx
+  Cycle 40000: DAC = 0xxx
+  Cycle 45000: DAC = 0xxx
+
+=== Results ===
+Total cycles: 500
+Non-zero DAC samples: 0
+FAIL: DAC is silent (no audio output)
+=== Test Complete ===
+tb\wsg3_func_tb.v:284: $finish called at 8216368940 (1ps)

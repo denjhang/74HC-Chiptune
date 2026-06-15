@@ -133,9 +133,8 @@ module wsg3_core (
     //   简化: cp273 = ~cp273_pulse_n 取上升沿, 即 cp273_pulse_n 从 1→0 时触发
     //   实现方式: 用 hc74 边沿检测或直接用 cp273_pulse_n 作 clk (active-low 时钟)
     //   这里用 ~bit[2] 作 cp273, 即 bit[2]=0 时钟高, 跟随 SPFM_CLK 上升沿触发
-    wire cp273 = (~cp273_pulse_n) & SPFM_RST_n & ~spfm_write_active;
-    // 异步清零: 仅 RST 或微码 step0 触发 (用 isx 防止 X 传播)
-    // 主机写时 hold 1 (不清零), 否则跟随微码 bit[3]
+    wire cp273 = ~cp273_pulse_n & SPFM_RST_n & ~spfm_write_active;
+    // 异步清零: RST 或微码 step0 sub3
     wire clr174_n = (~SPFM_RST_n) ? 1'b0 :
                     (spfm_write_active) ? 1'b1 :
                     rom3m_clr_n;
@@ -280,12 +279,13 @@ module wsg3_core (
     // ============================================================
     // U10: 39SF040 — 1M 波形 ROM
     //   地址: A[2:0] = acc_dout[2:0] (波形号, 来自 acc RAM[5])
-    //         A[7:3] = carry_chain[4:0] (相位 0-31)
+    //         A[7:3] = 累加器低 5 位: {U6[1][0], U6[0][3:0]}
+    //   修复: 相位 = 20-bit 累加器的低 5-bit, 不是 carry_chain
     // ============================================================
     wire [7:0] rom1m_data;
     wire [3:0] wave_sample = rom1m_data[3:0];
 
-    wire [2:0] wave_sel  = acc_dout[2:0];  // 来自 acc RAM 当前 tdm_step
+    wire [2:0] wave_sel  = acc_dout[2:0];
     wire [4:0] phase_sel = carry_chain[4:0];
 
     hc39sf040 #(.ADDR_WIDTH(19), .DATA_WIDTH(8), .INIT_FILE("rom/wsg3_prom1m.hex"))
