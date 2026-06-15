@@ -120,20 +120,14 @@ module wsg3_core (
     );
 
     // 控制位解码 (Pac-Man 原版位映射)
-    //   bit[3] = /CLR (异步清零 carry chain, 0=clear)
-    //   bit[2] = /cp273 (输出锁存, 0=输出步骤)
-    //   bit[1] = /acc_we (acc RAM 写使能, 0=写)
-    //   bit[0] = clk174 (carry chain 时钟, 上升沿锁存)
+    //   bit[3] = ~clr174_n (异步清零 carry chain, 0=clear)
+    //   bit[2] = ~acc_we_n (acc RAM 写使能, 0=写)
+    //   bit[1] = cp273     (输出锁存, 1=上升沿锁存输出)
+    //   bit[0] = clk174    (carry chain 时钟, 1=上升沿锁存)
     wire rom3m_clr_n    = rom3m_data[3];
-    wire cp273_pulse_n  = rom3m_data[2];   // 0=输出步骤
-    wire rom3m_acc_we_n = rom3m_data[1];   // 0=写 acc
+    wire rom3m_acc_we_n = rom3m_data[2];   // 0=写 acc
+    wire cp273          = rom3m_data[1] & SPFM_RST_n & ~spfm_write_active;
     wire clk174         = rom3m_data[0] & SPFM_RST_n & ~spfm_write_active;
-
-    // 时钟边沿: cp273 在 bit[2] 上升沿 (从 1→0 反相后取下降沿, 用 bit[2] 下降沿)
-    //   简化: cp273 = ~cp273_pulse_n 取上升沿, 即 cp273_pulse_n 从 1→0 时触发
-    //   实现方式: 用 hc74 边沿检测或直接用 cp273_pulse_n 作 clk (active-low 时钟)
-    //   这里用 ~bit[2] 作 cp273, 即 bit[2]=0 时钟高, 跟随 SPFM_CLK 上升沿触发
-    wire cp273 = ~cp273_pulse_n & SPFM_RST_n & ~spfm_write_active;
     // 异步清零: RST 或微码 step0 sub3
     wire clr174_n = (~SPFM_RST_n) ? 1'b0 :
                     (spfm_write_active) ? 1'b1 :

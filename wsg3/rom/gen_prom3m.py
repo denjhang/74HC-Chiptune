@@ -23,10 +23,10 @@
 ROM_SIZE = 512 * 1024  # 39SF040 = 512KB
 
 # 控制 bit 定义 (Pac-Man 原版)
-#     bit[3] = ~clr174_n (0=异步清零 carry chain, 1=不清零)
-#     bit[2] = ~acc_we_n (0=写加法结果回 acc RAM, 1=不写)
-#     bit[1] = cp273     (1=上升沿锁存输出, 0=不锁存)
-#     bit[0] = clk174    (1=上升沿锁存 carry chain, 0=不锁存)
+#     bit[3] = ~clr174_n (异步清零 carry chain, 0=clear, 1=don't clear)
+#     bit[2] = ~acc_we_n (acc RAM 写使能, 0=write, 1=don't write)
+#     bit[1] = cp273     (输出锁存, 1=latch output, 0=don't latch)
+#     bit[0] = clk174    (carry chain 时钟, 1=latch carry, 0=don't latch)
 CLR_N   = 0b1000  # bit[3]=1 (不清零)
 ACC_WE  = 0b0000  # bit[2]=0 (写 acc)
 CP273   = 0b0010  # bit[1]=1 (锁存输出)

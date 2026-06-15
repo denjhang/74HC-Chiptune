@@ -206,9 +206,30 @@ module wsg3_func_tb;
             @(posedge SPFM_CLK);
             #1;
             if (i < 40 || (i % 32 == 0 && i < 200))
-                $display("  i=%0d hcnt=%02X dac=%02X u11_q=%02X carry=%06b wave_sel=%03b phase_sel=%05b rom1m=%02X",
+                $display("  i=%0d hcnt=%02X dac=%02X u11_q=%02X carry=%06b wave_sel=%03b phase_sel=%05b rom1m=%02X cp273=%b",
                     i, u_dut.hcnt_r, dac_out, u_dut.u11_q, u_dut.carry_chain,
-                    u_dut.wave_sel, u_dut.phase_sel, u_dut.rom1m_data);
+                    u_dut.wave_sel, u_dut.phase_sel, u_dut.rom1m_data, u_dut.cp273);
+        end
+
+        // 追踪 3 个完整输出周期 (step 5)
+        $display("");
+        $display("=== Output step (step 5) trace ===");
+        begin : output_step_trace
+            integer k;
+            for (k = 0; k < 500; k = k + 1) begin
+                @(posedge SPFM_CLK);
+                #0.1;
+                if (u_dut.hcnt_r[5:2] == 4'd5 && u_dut.hcnt_r[1:0] == 2'd0) begin
+                    $display("  hcnt=%02X step5_sub0: carry=%06b phase=%02d rom_addr=%02d rom1m=%02X dac=%02X cp273=%b clk174=%b",
+                        u_dut.hcnt_r, u_dut.carry_chain, u_dut.phase_sel,
+                        {u_dut.wave_sel, u_dut.phase_sel}, u_dut.rom1m_data, dac_out, u_dut.cp273, u_dut.clk174);
+                end
+                if (u_dut.cp273) begin
+                    $display("  hcnt=%02X cp273_RISE: carry=%06b phase=%02d rom_addr=%02d rom1m=%02X dac=%02X",
+                        u_dut.hcnt_r, u_dut.carry_chain, u_dut.phase_sel,
+                        {u_dut.wave_sel, u_dut.phase_sel}, u_dut.rom1m_data, dac_out);
+                end
+            end
         end
 
         // 打开 CSV 输出
