@@ -27,37 +27,46 @@ ROM_SIZE = 512 * 1024  # 39SF040 = 512KB
 #     bit[2] = ~acc_we_n (acc RAM 写使能, 0=write, 1=don't write)
 #     bit[1] = cp273     (输出锁存, 1=latch output, 0=don't latch)
 #     bit[0] = clk174    (carry chain 时钟, 1=latch carry, 0=don't latch)
+#
+# 正确的加法步骤需要：clk174=1 + acc_we_n=0 (写回)
+# 组合：bit[0]=1, bit[2]=0 → nibble = 0101
 CLR_N   = 0b1000  # bit[3]=1 (不清零)
-ACC_WE  = 0b0000  # bit[2]=0 (写 acc)
+ACC_WE  = 0b0000  # bit[2]=0 (写 acc) - 正确！
 CP273   = 0b0010  # bit[1]=1 (锁存输出)
 CLK174  = 0b0001  # bit[0]=1 (锁存 carry)
 
 # 修改后的 16-bit 微码字
-# 实验: 移除 step 0/6/B 的清零操作，让 carry_chain 跨周期累加
-#   step 0 (ch0 nibble 0, NO clear):      1101_1110_1111_1111 = 0xDEFF
-#   step 1-4 (ch0 nibble 1-4):           1101_1110_1111_1111 = 0xDEFF
-#   step 5 (ch0 output):                 1011_1111_1111_1111 = 0xBFFF
-#   step 6 (ch1 nibble 0, NO clear):     1101_1110_1111_1111 = 0xDEFF
-#   step 7-9, C-E:                       0xDEFF
-#   step A, F (ch1/ch2 output):          0xBFFF
+# 策略：sub0 加法 (clk174=1), sub2 写回 (acc_we=0), 不清零
+#
+# sub0=1101: clk174=1, 加法
+# sub1=1111: 等待
+# sub2=1011: acc_we=0 (写回), cp273=1
+# sub3=1111: 等待
+#
+# 计算: 1101 1111 1011 1111 = 0xDFBF
 rom3m_16bit = [
-    0xDEFF,  # step 0: ch0 nibble 0, NO CLEAR
-    0xDEFF,  # step 1: ch0 nibble 1
-    0xDEFF,  # step 2: ch0 nibble 2
-    0xDEFF,  # step 3: ch0 nibble 3
-    0xDEFF,  # step 4: ch0 nibble 4 (5 nibbles = 20-bit)
-    0xBFFF,  # step 5: ch0 output
-    0xDEFF,  # step 6: ch1 nibble 0, NO CLEAR
-    0xDEFF,  # step 7: ch1 nibble 1
-    0xDEFF,  # step 8: ch1 nibble 2
-    0xDEFF,  # step 9: ch1 nibble 3
-    0xBFFF,  # step A: ch1 output
-    0xDEFF,  # step B: ch2 nibble 0, NO CLEAR
-    0xDEFF,  # step C: ch2 nibble 1
-    0xDEFF,  # step D: ch2 nibble 2
-    0xDEFF,  # step E: ch2 nibble 3
-    0xBFFF,  # step F: ch2 output
+    0xDFBF,  # step 0
+    0xDFBF,  # step 1
+    0xDFBF,  # step 2
+    0xDFBF,  # step 3
+    0xDFBF,  # step 4
+    0xBFFF,  # step 5: 输出
+    0xDFBF,  # step 6
+    0xDFBF,  # step 7
+    0xDFBF,  # step 8
+    0xBFFF,  # step 9
+    0xDFBF,  # step A
+    0xDFBF,  # step B
+    0xDFBF,  # step C
+    0xDFBF,  # step D
+    0xDFBF,  # step E
+    0xBFFF,  # step F
 ]
+
+assert len(rom3m_16bit) == 16
+
+# 确保有 16 个 step
+assert len(rom3m_16bit) == 16
 
 assert len(rom3m_16bit) == 16
 
