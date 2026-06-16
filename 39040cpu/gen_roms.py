@@ -50,31 +50,38 @@ def gen_alu_rom():
     return alu
 
 def gen_test_program():
-    """生成测试程序: 简单的 LD + OUT 序列
+    """生成测试程序: ALU + RAM + JMP + 条件分支 + 循环
 
-    测试目标:
-      1. LD AC, 0x42      → AC = 0x42
-      2. LD OUT, AC       → OUT = 0x42 (DATA_OUT 应为 0x42)
-      3. LD AC, 0x13      → AC = 0x13
-      4. ADD AC, 0x37     → AC = 0x4A (0x13 + 0x37)
-      5. LD OUT, AC       → OUT = 0x4A
-      6. LD AC, 0xFF      → AC = 0xFF
-      7. AND AC, 0x0F     → AC = 0x0F
-      8. LD OUT, AC       → OUT = 0x0F
-      9. LD AC, 0xA5      → AC = 0xA5
-     10. OR  AC, 0x3C     → AC = 0xBD
-     11. LD OUT, AC       → OUT = 0xBD
-     12. LD AC, 0xFF      → AC = 0xFF
-     13. XOR AC, 0xAA     → AC = 0x55
-     14. LD OUT, AC       → OUT = 0x55
-     15. LD AC, 0x50      → AC = 0x50
-     16. SUB AC, 0x20     → AC = 0x30
-     17. LD OUT, AC       → OUT = 0x30
-
-    指令编码: INS[7:5]|MOD[4:2]|BUS[1:0]
+    测试目标 (OUT 输出序列):
+      ALU 测试:
+        1. LD OUT, 0x42       → OUT = 0x42
+        2. ADD 0x13+0x37       → OUT = 0x4A
+        3. AND 0xFF&0x0F       → OUT = 0x0F
+        4. OR  0xA5|0x3C       → OUT = 0xBD
+        5. XOR 0xFF^0xAA       → OUT = 0x55
+        6. SUB 0x50-0x20       → OUT = 0x30
+      RAM 读写测试:
+        7. ST [0x10], 0xDE    → 写 RAM[0x10] = 0xDE
+        8. LD AC, [0x10]       → 读 RAM[0x10] = 0xDE
+        9. LD OUT, AC          → OUT = 0xDE
+      条件分支测试:
+       10. LD AC, 0x80        → AC = 0x80 (negative)
+       11. BN skip            → AC[7]=1, branch taken → skip next
+       12. LD OUT, 0xAA       → (skipped)
+       13. LD OUT, 0xBB       → OUT = 0xBB (证明跳过了 0xAA)
+      循环测试 (count down 3→0, output 0x03, 0x02, 0x01):
+       14. LD X, 0x03         → X = 3
+       15. LD Y, loop_start   → Y = 循环起始地址
+       16. loop: LD AC, X      → AC = X
+       17. LD OUT, AC         → output X
+       18. SUB AC, 0x01       → AC = X - 1
+       19. BZ end              → if X-1 == 0, branch to end
+       20. LD X, AC            → X = X - 1
+       21. JMP [Y]             → jump back to loop
+       22. end: LD OUT, 0xFF   → OUT = 0xFF (loop done)
+       23. JMP self
     """
 
-    # 指令助记 → 编码
     def encode(ins, mod, bus):
         return (ins << 5) | (mod << 2) | bus
 
@@ -88,7 +95,7 @@ def gen_test_program():
     ST  = 6
     JMP = 7
 
-    # MOD
+    # MOD (非JMP)
     MODE_D   = 0  # [D]
     MODE_X   = 1  # [X]
     MODE_Y   = 2  # [Y]
@@ -98,57 +105,109 @@ def gen_test_program():
     TO_OUT   = 6  # → OUT
     MODE_YX_INC = 7  # [Y+X], X++
 
+    # MOD (JMP)
+    JMP_FAR = 0  # 无条件远跳 {Y, bus}
+    B_CARRY = 1  # carry
+    B_ZERO  = 2  # zero
+    B_NEG   = 4  # negative
+
     # BUS
-    BUS_D   = 0  # D (ROM2)
-    BUS_RAM = 1  # RAM
-    BUS_AC  = 2  # AC
-    BUS_IN  = 3  # EXT_IN
+    BUS_D   = 0
+    BUS_RAM = 1
+    BUS_AC  = 2
+    BUS_IN  = 3
+    BUS_X   = BUS_D   # X 间接寻址: MOD=1(MODE_X), bus 选择 X 地址
 
-    ctrl_prog = []
-    data_prog = []
+    prog = []
 
-    # 指令列表: (ctrl_byte, data_byte)
-    prog = [
-        # 1. LD AC, 0x42
-        (encode(LD, MODE_D, BUS_D), 0x42),
-        # 2. LD OUT, AC (bus=AC, mod=TO_OUT)
-        (encode(LD, TO_OUT, BUS_AC), 0x00),
-        # 3. LD AC, 0x13
-        (encode(LD, MODE_D, BUS_D), 0x13),
-        # 4. ADD AC, 0x37
-        (encode(ADD, MODE_D, BUS_D), 0x37),
-        # 5. LD OUT, AC
-        (encode(LD, TO_OUT, BUS_AC), 0x00),
-        # 6. LD AC, 0xFF
-        (encode(LD, MODE_D, BUS_D), 0xFF),
-        # 7. AND AC, 0x0F
-        (encode(AND, MODE_D, BUS_D), 0x0F),
-        # 8. LD OUT, AC
-        (encode(LD, TO_OUT, BUS_AC), 0x00),
-        # 9. LD AC, 0xA5
-        (encode(LD, MODE_D, BUS_D), 0xA5),
-        # 10. OR AC, 0x3C
-        (encode(OR, MODE_D, BUS_D), 0x3C),
-        # 11. LD OUT, AC
-        (encode(LD, TO_OUT, BUS_AC), 0x00),
-        # 12. LD AC, 0xFF
-        (encode(LD, MODE_D, BUS_D), 0xFF),
-        # 13. XOR AC, 0xAA
-        (encode(XOR, MODE_D, BUS_D), 0xAA),
-        # 14. LD OUT, AC
-        (encode(LD, TO_OUT, BUS_AC), 0x00),
-        # 15. LD AC, 0x50
-        (encode(LD, MODE_D, BUS_D), 0x50),
-        # 16. SUB AC, 0x20
-        (encode(SUB, MODE_D, BUS_D), 0x20),
-        # 17. LD OUT, AC
-        (encode(LD, TO_OUT, BUS_AC), 0x00),
-    ]
+    # === ALU 测试 ===
+    # [0] LD AC, 0x42
+    prog.append((encode(LD, MODE_D, BUS_D), 0x42))
+    # [1] LD OUT, AC
+    prog.append((encode(LD, TO_OUT, BUS_AC), 0x00))
+    # [2] LD AC, 0x13
+    prog.append((encode(LD, MODE_D, BUS_D), 0x13))
+    # [3] ADD AC, 0x37 → 0x4A
+    prog.append((encode(ADD, MODE_D, BUS_D), 0x37))
+    # [4] LD OUT, AC
+    prog.append((encode(LD, TO_OUT, BUS_AC), 0x00))
+    # [5] LD AC, 0xFF
+    prog.append((encode(LD, MODE_D, BUS_D), 0xFF))
+    # [6] AND AC, 0x0F → 0x0F
+    prog.append((encode(AND, MODE_D, BUS_D), 0x0F))
+    # [7] LD OUT, AC
+    prog.append((encode(LD, TO_OUT, BUS_AC), 0x00))
+    # [8] LD AC, 0xA5
+    prog.append((encode(LD, MODE_D, BUS_D), 0xA5))
+    # [9] OR AC, 0x3C → 0xBD
+    prog.append((encode(OR, MODE_D, BUS_D), 0x3C))
+    # [10] LD OUT, AC
+    prog.append((encode(LD, TO_OUT, BUS_AC), 0x00))
+    # [11] LD AC, 0xFF
+    prog.append((encode(LD, MODE_D, BUS_D), 0xFF))
+    # [12] XOR AC, 0xAA → 0x55
+    prog.append((encode(XOR, MODE_D, BUS_D), 0xAA))
+    # [13] LD OUT, AC
+    prog.append((encode(LD, TO_OUT, BUS_AC), 0x00))
+    # [14] LD AC, 0x50
+    prog.append((encode(LD, MODE_D, BUS_D), 0x50))
+    # [15] SUB AC, 0x20 → 0x30
+    prog.append((encode(SUB, MODE_D, BUS_D), 0x20))
+    # [16] LD OUT, AC
+    prog.append((encode(LD, TO_OUT, BUS_AC), 0x00))
 
-    # 18. JMP self (无限循环)
-    (encode(JMP, MODE_D, BUS_D), 0x00),
+    # === RAM 读写测试 ===
+    # [17] LD AC, 0xDE
+    prog.append((encode(LD, MODE_D, BUS_D), 0xDE))
+    # [18] ST [0x10], AC → RAM[0x10] = 0xDE
+    #   ST 用 MOD=0 (addr=D=0x10), bus=D=0x10
+    #   但 ST 写入 bus_data 到 mem_addr
+    #   mem_addr = {0, D} = 0x10, bus = AC (BUS_AC)
+    #   ST 控制字: INS=6, MOD=0([D]=addr_lo), BUS=2(AC)
+    prog.append((encode(ST, MODE_D, BUS_AC), 0x10))
+    # [19] LD AC, 0x00 (clear AC to prove RAM read)
+    prog.append((encode(LD, MODE_D, BUS_D), 0x00))
+    # [20] LD AC, [0x10] → read RAM[0x10]
+    prog.append((encode(LD, MODE_D, BUS_RAM), 0x10))
+    # [21] LD OUT, AC → OUT = 0xDE
+    prog.append((encode(LD, TO_OUT, BUS_AC), 0x00))
 
-    # 填充到 512K
+    # === 条件分支测试 ===
+    # [22] LD AC, 0x80 (negative)
+    prog.append((encode(LD, MODE_D, BUS_D), 0x80))
+    # [23] BN +2 → if AC[7]=1, jump to [25]
+    #   JMP with MOD=B_NEG(4), target = pc_hi + D
+    prog.append((encode(JMP, B_NEG, BUS_D), 0x19))  # 23+2=25
+    # [24] LD OUT, 0xAA (should be SKIPPED)
+    prog.append((encode(LD, TO_OUT, BUS_D), 0xAA))
+    # [25] LD OUT, 0xBB → should appear
+    prog.append((encode(LD, TO_OUT, BUS_D), 0xBB))
+
+    # === 循环测试 (用 AC 做计数器, 倒数 3→1) ===
+    # [26] LD AC, 0x03
+    prog.append((encode(LD, MODE_D, BUS_D), 0x03))
+    # [27] LD Y, 0x00 → Y = 0 (far jump 高字节)
+    prog.append((encode(LD, TO_Y, BUS_D), 0x00))
+    # loop_start [28]: LD OUT, AC → output counter
+    prog.append((encode(LD, TO_OUT, BUS_AC), 0x00))
+    # [29]: SUB AC, 0x01 → AC--
+    prog.append((encode(SUB, MODE_D, BUS_D), 0x01))
+    # [30]: BZ 33 → if AC==0, near jump to instruction 33
+    #   d_reg = 33 (instruction index), 硬件: PC = {pc_hi, 33, 1}
+    #   rom_addr = {pc_hi, 33} = 33
+    prog.append((encode(JMP, B_ZERO, BUS_D), 0x21))
+    # [31]: JMP FAR → jump back to instruction 28
+    #   target = {Y=0, bus_data[7:1]=28, 1'b1}, rom_addr = {0, 28} = 28
+    #   bus_data = 28<<1 | 1 = 57 = 0x39
+    prog.append((encode(JMP, JMP_FAR, BUS_D), 0x39))
+    # [32]: (padding, never reached)
+    prog.append((encode(LD, MODE_D, BUS_D), 0x00))
+    # [33]: LD OUT, 0xFF (loop done)
+    prog.append((encode(LD, TO_OUT, BUS_D), 0xFF))
+    # [34]: JMP self → infinite halt
+    #   bus_data = 34<<1 | 1 = 69 = 0x45
+    prog.append((encode(JMP, JMP_FAR, BUS_D), 0x45))
+
     ctrl = bytearray(524288)
     data = bytearray(524288)
 
