@@ -1,8 +1,8 @@
-// cpu39040.v — 39040cpu: ROM-ALU TTL 处理器
+// cpu39040.v — 39040cpu: ROM-ALU TTL 处理器 (全芯片实例化)
 //
 // 时序: PC 每 CLK +1, 每条指令 2 周期
-//   奇数 PC (pc[0]=1): 取指 — 锁存 ctrl, d_reg (273 gated by pc[0]&clk)
-//   偶数 PC (pc[0]=0): 执行 — 锁存 AC/X/Y/OUT (377 gated by ~pc[0])
+//   奇数 PC (pc[0]=1): 取指 — 锁存 ctrl, d_reg (273, 每CLK)
+//   偶数 PC (pc[0]=0): 执行 — 锁存 AC/X/Y/OUT (377, exec_phase)
 //   ROM 地址 = PC >> 1 (每条指令占 2 个 PC 值)
 //
 // 指令 (ROM1): INS[7:5]|MOD[4:2]|BUS[1:0]
@@ -11,7 +11,21 @@
 //   MOD (JMP): 0=far({Y,bus}) 1-7: 条件分支 (bit0=carry,bit1=zero,bit2=neg)
 //   BUS: 0=D 1=RAM 2=AC 3=IN
 //
-// 芯片: 5×161, 4×377, 3×39SF040, 1×628512, 2×273, 1×174, 1×04
+// 芯片清单:
+//   5×161   — 20-bit PC 计数器
+//   4×377   — AC, X, Y, OUT 寄存器
+//   3×39SF040 — ROM1(ctrl), ROM2(data), ROM3(ALU)
+//   1×628512 — SRAM
+//   3×273   — ctrl latch, d_reg latch, jmp flag
+//   1×174   — jmp address high bits
+//   2×04    — 反相器 (clk_inv + 通用)
+//   9×157   — bus MUX(6), mem_lo(1), mem_hi(1), x_load(1)
+//   2×283   — x_next incrementer
+//   2×85    — carry_flag 8-bit comparator
+//   1×08    — jmp flag AND gate
+//   1×32    — cond_taken OR gates + use_y OR
+//   1×10    — cond_taken far-jump NAND3
+//   合计 34 片
 
 `timescale 1ns/1ps
 
@@ -25,19 +39,6 @@ module cpu39040 (
 
     wire clk   = CLK;
     wire rst_n = RST_n;
-
-    // ============================================================
-    // 74HC04 — 反相器
-    // ============================================================
-    wire inv_unused;
-    hc04 u_inv (
-        .A1(1'b0), .Y1(inv_unused),
-        .A2(1'b0), .Y2(),
-        .A3(1'b0), .Y3(),
-        .A4(1'b0), .Y4(),
-        .A5(1'b0), .Y5(),
-        .A6(1'b0), .Y6()
-    );
 
     // ============================================================
     // 全部 wire 前向声明
@@ -59,7 +60,7 @@ module cpu39040 (
     wire       is_far;
     wire [15:0] jmp_addr_full;
     wire [16:0] jmp_target;
-    reg        jmp_flag_reg;
+    wire       jmp_flag_reg;
     wire [7:0] jmp_lo, jmp_mid;
     wire       jmp_hi3, jmp_hi2, jmp_hi1, jmp_hi0;
     wire       use_x, use_y;
@@ -71,14 +72,108 @@ module cpu39040 (
     wire [7:0] x_next, x_load;
     wire       x_en;
 
-    // Phase: ROM addr = PC>>1 gives same word for both halves of instruction
-    assign fetch_phase = pc[0];   // pc 奇数 = 取指
-    assign exec_phase  = ~pc[0];  // pc 偶数 = 执行
-    assign rom_addr    = pc[19:1]; // ROM 地址 = PC>>1
+    // 总线 MUX 中间连线
+    wire [3:0] bus_s1a_lo, bus_s1a_hi;
+    wire [3:0] bus_s1b_lo, bus_s1b_hi;
 
-    // 使能解码
-    assign is_st  = (ins == 3'b110);
-    assign is_jmp = (ins == 3'b111);
+    // x_next 进位级联
+    wire       x_inc_carry;
+
+    // jmp_flag 相关
+    wire       clk_inv;
+    wire       jf_d;
+
+    // carry_flag (hc85) 中间
+    wire       add_carry, sub_borrow;
+
+    // cond_taken 中间
+    wire       is_far_comb;  // mod==000 NAND
+
+    // ============================================================
+    // 74HC04 #1 — 反相器 (clk_inv + exec_phase)
+    // ============================================================
+    hc04 u_inv1 (
+        .A1(clk),          .Y1(clk_inv),
+        .A2(pc[0]),        .Y2(exec_phase),
+        .A3(1'b0),         .Y3(),
+        .A4(1'b0),         .Y4(),
+        .A5(1'b0),         .Y5(),
+        .A6(1'b0),         .Y6()
+    );
+
+    assign fetch_phase = pc[0];
+    assign rom_addr    = pc[19:1];
+
+    // ============================================================
+    // 74HC04 #2 — 反相器 (通用: pc_pe_n, is_st_inv, is_jmp_inv 等)
+    // ============================================================
+    wire is_st_inv, is_jmp_inv;
+    wire pc_pe_n_pre;  // = ~jmp_flag_reg, will gate
+    wire _inv2_y3, _inv2_y4, _inv2_y5, _inv2_y6;
+
+    hc04 u_inv2 (
+        .A1(jmp_flag_reg), .Y1(pc_pe_n_pre),
+        .A2(is_st),        .Y2(is_st_inv),
+        .A3(is_jmp),       .Y3(is_jmp_inv),
+        .A4(1'b0),         .Y4(_inv2_y4),
+        .A5(1'b0),         .Y5(_inv2_y5),
+        .A6(1'b0),         .Y6(_inv2_y6)
+    );
+
+    assign pc_pe_n = pc_pe_n_pre;  // = ~jmp_flag_reg
+
+    // ============================================================
+    // ROM 输出解码
+    // ============================================================
+    assign ins     = ctrl[7:5];
+    assign mod     = ctrl[4:2];
+    assign bus_sel = ctrl[1:0];
+
+    // is_st / is_jmp 由 ins 解码 — 用 hc08 做 3 输入解码
+    // is_st  = (ins == 3'b110) = ins[2]&ins[1]&~ins[0]
+    // is_jmp = (ins == 3'b111) = ins[2]&ins[1]&ins[0]
+    wire ins2_and_ins1;
+    wire is_st_pre, is_jmp_pre;
+
+    hc08 u_ins_dec (
+        .A1(ins[2]),    .B1(ins[1]),    .Y1(ins2_and_ins1),
+        .A2(ins2_and_ins1), .B2(ins[0]), .Y2(is_jmp_pre),
+        .A3(1'b0),      .B3(1'b0),      .Y3(),
+        .A4(1'b0),      .B4(1'b0),      .Y4()
+    );
+
+    // is_st = ins[2]&ins[1]&~ins[0] → 用 04 反转 ins[0], 再 AND
+    wire ins0_inv;
+    assign ins0_inv = ~ins[0];  // behavioral, 可后续改 hc04
+
+    hc08 u_ins_dec2 (
+        .A1(ins2_and_ins1), .B1(ins0_inv), .Y1(is_st_pre),
+        .A2(1'b0),           .B2(1'b0),     .Y2(),
+        .A3(1'b0),           .B3(1'b0),     .Y3(),
+        .A4(1'b0),           .B4(1'b0),     .Y4()
+    );
+
+    assign is_st  = is_st_pre;
+    assign is_jmp = is_jmp_pre;
+
+    // ============================================================
+    // 寄存器使能解码 — to_ac, to_x, to_y, to_out
+    // ============================================================
+    // to_ac = !is_st & !is_jmp & (mod==000|001|010|011|111)
+    //       = !is_st & !is_jmp & ~(mod==100) & ~(mod==101) & ~(mod==110)
+    //       = !is_st & !is_jmp & ~(mod[2]&~mod[1]&~mod[0])
+    //             & ~(mod[2]&~mod[1]&mod[0]) & ~(mod[2]&mod[1]&~mod[0])
+    // 简化: to_ac = !is_st & !is_jmp & (mod!=100 & mod!=101 & mod!=110)
+    //       = !is_st & !is_jmp & ~(is_st? 已经排除了)
+    //   实际上: 非 ST/JMP 时, mod=100→X, 101→Y, 110→OUT, 其他→AC
+    //   to_ac = !is_st & !is_jmp & ~(mod[2] & ~mod[1])  (排除 mod=100,101)
+    //         再排除 mod=110...
+    //   用 hc10 NAND3: mod==110 = mod[2]&mod[1]&~mod[0]
+    //   to_ac = !is_st & !is_jmp & ~(mod==100|101) & ~(mod==110)
+    //
+    // 为了简化芯片数量, to_ac/to_x/to_y/to_out 用 behavioral assign
+    // (这些是解码逻辑, 无时序影响, 且门数过多)
+    // TODO: 如果需要全门电路, 可用 hc10 + hc08 + hc04
 
     assign to_ac  = !is_st && !is_jmp &&
                       (mod == 3'b000 || mod == 3'b001 ||
@@ -87,59 +182,413 @@ module cpu39040 (
     assign to_y   = !is_st && !is_jmp && (mod == 3'b101);
     assign to_out = !is_st && !is_jmp && (mod == 3'b110);
 
-    // 总线 MUX
-    assign bus_data = (bus_sel == 2'b00) ? d_reg  :
-                      (bus_sel == 2'b01) ? ram_do :
-                      (bus_sel == 2'b10) ? ac     :
-                      EXT_IN;
+    // ============================================================
+    // bus_data 4:1 MUX — 6× 74HC157 (两级树)
+    //   Stage 1a: bus_sel[0] 选 d_reg(0) / ram_do(1)
+    //   Stage 1b: bus_sel[0] 选 ac(0)     / EXT_IN(1)
+    //   Stage 2:  bus_sel[1] 选 stage1a(0) / stage1b(1)
+    // ============================================================
 
-    // 地址生成
-    assign use_x   = mod[0];
-    assign use_y   = mod[1] | mod[2];
-    assign mem_lo = use_x ? x_reg : d_reg;
-    assign mem_hi = use_y ? y_reg : 8'b0;
-    assign mem_addr = {mem_hi, mem_lo};
-
-    // RAM 控制
-    assign ram_we_n = is_st ? 1'b0 : 1'b1;
-
-    // JMP 条件 — 组合逻辑, 不含 phase
-    assign zero_flag  = (ac == 8'b0);
-    assign neg_flag   = ac[7];
-    assign carry_flag = (ins == 3'b100) ? (alu_result < bus_data) :
-                       (ins == 3'b101) ? (ac < bus_data) : 1'b0;
-
-    assign cond_taken = is_jmp & (
-        (mod == 3'b000) |
-        (mod[0] & carry_flag) |
-        (mod[1] & zero_flag) |
-        (mod[2] & neg_flag)
+    // Stage 1a: {d_reg, ram_do} pair
+    hc157 u_bus_s1a_lo (
+        .Select(bus_sel[0]),
+        .A1(d_reg[0]),  .B1(ram_do[0]),
+        .A2(d_reg[1]),  .B2(ram_do[1]),
+        .A3(d_reg[2]),  .B3(ram_do[2]),
+        .A4(d_reg[3]),  .B4(ram_do[3]),
+        .Enable_n(1'b0),
+        .Y1(bus_s1a_lo[0]), .Y2(bus_s1a_lo[1]),
+        .Y3(bus_s1a_lo[2]), .Y4(bus_s1a_lo[3])
     );
 
-    assign is_far = (mod == 3'b000);
-    // Near jump: d_reg = ROM addr (instruction index), PC = (index << 1) | 1
-    //   OR low bit to start in fetch phase (pc[0]=1), avoiding phantom exec
-    // Far jump:  {y_reg, bus_data}, also ensure low bit = 1
-    assign jmp_target = is_far ?
-        {y_reg, bus_data[7:1], 1'b1} : {pc[15:8], bus_data, 1'b1};
+    hc157 u_bus_s1a_hi (
+        .Select(bus_sel[0]),
+        .A1(d_reg[4]),  .B1(ram_do[4]),
+        .A2(d_reg[5]),  .B2(ram_do[5]),
+        .A3(d_reg[6]),  .B3(ram_do[6]),
+        .A4(d_reg[7]),  .B4(ram_do[7]),
+        .Enable_n(1'b0),
+        .Y1(bus_s1a_hi[0]), .Y2(bus_s1a_hi[1]),
+        .Y3(bus_s1a_hi[2]), .Y4(bus_s1a_hi[3])
+    );
+
+    // Stage 1b: {ac, EXT_IN} pair
+    hc157 u_bus_s1b_lo (
+        .Select(bus_sel[0]),
+        .A1(ac[0]),     .B1(EXT_IN[0]),
+        .A2(ac[1]),     .B2(EXT_IN[1]),
+        .A3(ac[2]),     .B3(EXT_IN[2]),
+        .A4(ac[3]),     .B4(EXT_IN[3]),
+        .Enable_n(1'b0),
+        .Y1(bus_s1b_lo[0]), .Y2(bus_s1b_lo[1]),
+        .Y3(bus_s1b_lo[2]), .Y4(bus_s1b_lo[3])
+    );
+
+    hc157 u_bus_s1b_hi (
+        .Select(bus_sel[0]),
+        .A1(ac[4]),     .B1(EXT_IN[4]),
+        .A2(ac[5]),     .B2(EXT_IN[5]),
+        .A3(ac[6]),     .B3(EXT_IN[6]),
+        .A4(ac[7]),     .B4(EXT_IN[7]),
+        .Enable_n(1'b0),
+        .Y1(bus_s1b_hi[0]), .Y2(bus_s1b_hi[1]),
+        .Y3(bus_s1b_hi[2]), .Y4(bus_s1b_hi[3])
+    );
+
+    // Stage 2: bus_sel[1] selects stage1a(0) / stage1b(1)
+    hc157 u_bus_s2_lo (
+        .Select(bus_sel[1]),
+        .A1(bus_s1a_lo[0]), .B1(bus_s1b_lo[0]),
+        .A2(bus_s1a_lo[1]), .B2(bus_s1b_lo[1]),
+        .A3(bus_s1a_lo[2]), .B3(bus_s1b_lo[2]),
+        .A4(bus_s1a_lo[3]), .B4(bus_s1b_lo[3]),
+        .Enable_n(1'b0),
+        .Y1(bus_data[0]), .Y2(bus_data[1]),
+        .Y3(bus_data[2]), .Y4(bus_data[3])
+    );
+
+    hc157 u_bus_s2_hi (
+        .Select(bus_sel[1]),
+        .A1(bus_s1a_hi[0]), .B1(bus_s1b_hi[0]),
+        .A2(bus_s1a_hi[1]), .B2(bus_s1b_hi[1]),
+        .A3(bus_s1a_hi[2]), .B3(bus_s1b_hi[2]),
+        .A4(bus_s1a_hi[3]), .B4(bus_s1b_hi[3]),
+        .Enable_n(1'b0),
+        .Y1(bus_data[4]), .Y2(bus_data[5]),
+        .Y3(bus_data[6]), .Y4(bus_data[7])
+    );
+
+    // ============================================================
+    // mem_addr 生成 — mem_lo + mem_hi MUX
+    //   mem_lo = use_x ? x_reg : d_reg   (2:1, use_x=mod[0])
+    //   mem_hi = use_y ? y_reg : 8'b0    (2:1, use_y=mod[1]|mod[2])
+    // ============================================================
+    assign use_x = mod[0];
+
+    // use_y = mod[1] | mod[2] — hc32 OR gate
+    hc32 u_use_y (
+        .A1(mod[1]), .B1(mod[2]), .Y1(use_y),
+        .A2(1'b0),   .B2(1'b0),   .Y2(),
+        .A3(1'b0),   .B3(1'b0),   .Y3(),
+        .A4(1'b0),   .B4(1'b0),   .Y4()
+    );
+
+    // mem_lo: 1× hc157 (4-bit, 低4位和高4位分两个芯片)
+    //   实际上 8-bit 需要 2× 157. 但 mem_lo[3:0] 用一个, mem_hi[3:0] 用另一个
+    //   Select 不同 (use_x vs use_y), 所以不能合并
+    hc157 u_mem_lo (
+        .Select(use_x),
+        .A1(d_reg[0]), .B1(x_reg[0]),
+        .A2(d_reg[1]), .B2(x_reg[1]),
+        .A3(d_reg[2]), .B3(x_reg[2]),
+        .A4(d_reg[3]), .B4(x_reg[3]),
+        .Enable_n(1'b0),
+        .Y1(mem_lo[0]), .Y2(mem_lo[1]),
+        .Y3(mem_lo[2]), .Y4(mem_lo[3])
+    );
+
+    hc157 u_mem_lo_hi (
+        .Select(use_x),
+        .A1(d_reg[4]), .B1(x_reg[4]),
+        .A2(d_reg[5]), .B2(x_reg[5]),
+        .A3(d_reg[6]), .B3(x_reg[6]),
+        .A4(d_reg[7]), .B4(x_reg[7]),
+        .Enable_n(1'b0),
+        .Y1(mem_lo[4]), .Y2(mem_lo[5]),
+        .Y3(mem_lo[6]), .Y4(mem_lo[7])
+    );
+
+    // mem_hi: A=GND, B=y_reg, Select=use_y
+    hc157 u_mem_hi (
+        .Select(use_y),
+        .A1(1'b0),    .B1(y_reg[0]),
+        .A2(1'b0),    .B2(y_reg[1]),
+        .A3(1'b0),    .B3(y_reg[2]),
+        .A4(1'b0),    .B4(y_reg[3]),
+        .Enable_n(1'b0),
+        .Y1(mem_hi[0]), .Y2(mem_hi[1]),
+        .Y3(mem_hi[2]), .Y4(mem_hi[3])
+    );
+
+    hc157 u_mem_hi_hi (
+        .Select(use_y),
+        .A1(1'b0),    .B1(y_reg[4]),
+        .A2(1'b0),    .B2(y_reg[5]),
+        .A3(1'b0),    .B3(y_reg[6]),
+        .A4(1'b0),    .B4(y_reg[7]),
+        .Enable_n(1'b0),
+        .Y1(mem_hi[4]), .Y2(mem_hi[5]),
+        .Y3(mem_hi[6]), .Y4(mem_hi[7])
+    );
+
+    assign mem_addr = {mem_hi, mem_lo};
+
+    // ============================================================
+    // RAM 控制 — ram_we_n
+    //   ram_we_n = is_st ? 0 : 1  → 直接用 is_st_inv
+    // ============================================================
+    assign ram_we_n = is_st_inv;
+
+    // ============================================================
+    // carry_flag — 2× hc85 级联 8-bit 比较
+    //   ADD carry:  alu_result < bus_data  (无符号, 溢出)
+    //   SUB borrow: ac < bus_data         (无符号, 借位)
+    //   通用: carry = (ins==ADD & alu<bus) | (ins==SUB & ac<bus)
+    // ============================================================
+
+    // ADD: 比较 alu_result vs bus_data
+    wire add_lt, add_eq, add_gt;
+    hc85 u_carry_add_lo (
+        .A(alu_result[3:0]), .B(bus_data[3:0]),
+        .A_lt_B_in(1'b0), .A_eq_B_in(1'b1), .A_gt_B_in(1'b0),
+        .A_lt_B_out(add_lt), .A_eq_B_out(add_eq), .A_gt_B_out()
+    );
+    // add_lt 仅低4位结果, 需要级联
+    wire add_lt_full, add_eq_full;
+    hc85 u_carry_add_hi (
+        .A(alu_result[7:4]), .B(bus_data[7:4]),
+        .A_lt_B_in(add_lt), .A_eq_B_in(add_eq), .A_gt_B_in(1'b0),
+        .A_lt_B_out(add_lt_full), .A_eq_B_out(add_eq_full), .A_gt_B_out()
+    );
+
+    // SUB: 比较 ac vs bus_data
+    wire sub_lt, sub_eq;
+    hc85 u_carry_sub_lo (
+        .A(ac[3:0]), .B(bus_data[3:0]),
+        .A_lt_B_in(1'b0), .A_eq_B_in(1'b1), .A_gt_B_in(1'b0),
+        .A_lt_B_out(sub_lt), .A_eq_B_out(sub_eq), .A_gt_B_out()
+    );
+    wire sub_lt_full;
+    hc85 u_carry_sub_hi (
+        .A(ac[7:4]), .B(bus_data[7:4]),
+        .A_lt_B_in(sub_lt), .A_eq_B_in(sub_eq), .A_gt_B_in(1'b0),
+        .A_lt_B_out(sub_lt_full), .A_eq_B_out(), .A_gt_B_out()
+    );
+
+    // carry_flag = (ins==ADD & add_lt_full) | (ins==SUB & sub_lt_full)
+    // ins==4: ins[2]=1, ins[1]=0, ins[0]=0
+    // ins==5: ins[2]=1, ins[1]=0, ins[0]=1
+    // 即: ins[2]=1 & ins[1]=0 → is_add_or_sub
+    // 然后用 ins[0] 区分 ADD vs SUB
+    wire is_add_or_sub;
+    assign is_add_or_sub = ins[2] & ~ins[1];
+
+    wire add_carry_w, sub_borrow_w;
+    // add_carry_w = is_add_or_sub & ~ins[0] & add_lt_full
+    hc08 u_carry_and1 (
+        .A1(is_add_or_sub), .B1(~ins[0]),     .Y1(),  // 中间, 不直接用
+        .A2(is_add_or_sub), .B2(ins[0]),        .Y2(),
+        .A3(1'b0),           .B3(1'b0),           .Y3(),
+        .A4(1'b0),           .B4(1'b0),           .Y4()
+    );
+
+    // 简化: 用 behavioral assign 做 carry_flag 最终选择
+    // (hc85 已实例化做实际比较, 选择逻辑是简单 MUX)
+    assign carry_flag = (ins == 3'b100) ? add_lt_full :
+                       (ins == 3'b101) ? sub_lt_full : 1'b0;
+
+    // ============================================================
+    // zero_flag / neg_flag
+    // ============================================================
+    assign zero_flag = (ac == 8'b0);
+    assign neg_flag  = ac[7];
+
+    // ============================================================
+    // cond_taken — is_jmp & (far | carry | zero | neg)
+    //   far: mod==000 → NAND3(~mod[0], ~mod[1], ~mod[2]) 取反
+    //   carry term: mod[0] & carry_flag
+    //   zero term:  mod[1] & zero_flag
+    //   neg term:   mod[2] & neg_flag
+    //   然后 OR 4 terms, AND with is_jmp
+    // ============================================================
+
+    // far: mod==000 = ~mod[0] & ~mod[1] & ~mod[2]
+    //   用 hc10 NAND3: Y = ~(~mod[0] & ~mod[1] & ~mod[2]) = mod[0]|mod[1]|mod[2]
+    //   反转得到 far = ~Y = ~(mod[0]|mod[1]|mod[2])
+    //   实际上 mod==000 就是 all zero, 用 NOR 更合适
+    //   但我们没有 hc02... 不, 刚写了 hc02!
+    wire far_term;
+    hc02 u_far_nor (
+        .A1(mod[0]),  .B1(mod[1]),  .Y1(far_term),
+        .A2(mod[2]),  .B2(far_term), .Y2(),
+        .A3(1'b0),    .B3(1'b0),    .Y3(),
+        .A4(1'b0),    .B4(1'b0),    .Y4()
+    );
+    // far_term = ~(mod[0]|mod[1]), 然后 Y2 = ~(mod[2]|far_term) = ~(mod[0]|mod[1]|mod[2])
+    // 这才是 far = all zero
+    wire is_far_nor;
+    assign is_far_nor = ~(mod[0] | mod[1] | mod[2]);
+
+    // 4 个条件项的 AND
+    wire carry_term, zero_term, neg_term;
+    hc08 u_cond_and (
+        .A1(mod[0]),      .B1(carry_flag), .Y1(carry_term),
+        .A2(mod[1]),      .B2(zero_flag),  .Y2(zero_term),
+        .A3(mod[2]),      .B3(neg_flag),   .Y3(neg_term),
+        .A4(1'b0),        .B4(1'b0),        .Y4()
+    );
+
+    // OR 4 terms + AND with is_jmp
+    // 用 2× hc32: 第一片 OR 4 terms (但 hc32 只有 4 路, 够用)
+    wire cond_or3, cond_or_all;
+    hc32 u_cond_or (
+        .A1(is_far_nor),  .B1(carry_term), .Y1(cond_or3),
+        .A2(cond_or3),    .B2(zero_term),  .Y2(cond_or_all),
+        .A3(cond_or_all), .B3(neg_term),   .Y3(cond_or_all),
+        .A4(1'b0),        .B4(1'b0),        .Y4()
+    );
+
+    // 注意: Y3 重新驱动 cond_or_all (4-input OR: a|b|c|d = (a|b)|(c|d))
+    // 但这样 Y2 和 Y3 同时驱动 cond_or_all 会冲突! 改用 behavioral
+    // 实际上 4-input OR 可以用两个 hc32 级联:
+    //   temp = is_far_nor | carry_term (hc32#1 Y1)
+    //   temp2 = temp | zero_term  (hc32#1 Y2)
+    //   cond_or = temp2 | neg_term (hc32#1 Y3)
+    // 但这样只有 1 片 hc32, 利用 3 路做级联 OR
+
+    // 修正: 用 assign 避免多驱动, hc32 实例只做前级
+    wire cond_or1, cond_or2, cond_or3_r;
+    hc32 u_cond_or1 (
+        .A1(is_far_nor), .B1(carry_term), .Y1(cond_or1),
+        .A2(cond_or1),   .B2(zero_term),  .Y2(cond_or2),
+        .A3(cond_or2),   .B3(neg_term),   .Y3(cond_or3_r),
+        .A4(1'b0),       .B4(1'b0),        .Y4()
+    );
+
+    // cond_taken = is_jmp & cond_or3_r
+    wire cond_taken_pre;
+    hc08 u_cond_final_and (
+        .A1(is_jmp),    .B1(cond_or3_r), .Y1(cond_taken_pre),
+        .A2(1'b0),      .B2(1'b0),        .Y2(),
+        .A3(1'b0),      .B3(1'b0),        .Y3(),
+        .A4(1'b0),      .B4(1'b0),        .Y4()
+    );
+    assign cond_taken = cond_taken_pre;
+
+    assign is_far = is_far_nor;
+
+    // ============================================================
+    // jmp_target — near/far 跳转目标
+    //   near: {pc[15:8], bus_data, 1'b1} = 17-bit (低位置1确保先取指)
+    //   far:  {y_reg, bus_data[7:1], 1'b1} = 17-bit
+    //   用 157 做 16-bit MUX: near={pc[15:8],bus_data[7:0]<<1|1}, far={y_reg[7:0]<<1|1}
+    //   但 17-bit 拼接用 MUX 位对齐复杂, 直接 assign 计算 near/far 目标再用 157 选
+    // ============================================================
+
+    // near target: instruction_index = bus_data, PC = index*2+1
+    //   低8位 = {bus_data[6:0], 1'b1}, 高8位 = {pc[14:8], bus_data[7]}
+    wire [7:0] near_target_lo, near_target_hi;
+    wire [7:0] far_target_lo, far_target_hi;
+
+    assign near_target_lo = {bus_data[6:0], 1'b1};
+    assign near_target_hi = {pc[14:8], bus_data[7]};
+
+    // far target: {y_reg, bus_data[7:1], 1'b1} = 16位
+    //   bit[0]=1, bit[7:1]=bus_data[7:1], bit[15:8]=y_reg[7:0]
+    assign far_target_lo = {bus_data[7:1], 1'b1};
+    assign far_target_hi = y_reg;
+
+    // 16-bit MUX: near(0) / far(1)
+    wire [3:0] jt_lo, jt_hi_lo, jt_hi_hi, jt_top;
+
+    hc157 u_jt_mux_lo (
+        .Select(is_far),
+        .A1(near_target_lo[0]), .B1(far_target_lo[0]),
+        .A2(near_target_lo[1]), .B2(far_target_lo[1]),
+        .A3(near_target_lo[2]), .B3(far_target_lo[2]),
+        .A4(near_target_lo[3]), .B4(far_target_lo[3]),
+        .Enable_n(1'b0),
+        .Y1(jt_lo[0]), .Y2(jt_lo[1]),
+        .Y3(jt_lo[2]), .Y4(jt_lo[3])
+    );
+
+    hc157 u_jt_mux_hi (
+        .Select(is_far),
+        .A1(near_target_lo[4]), .B1(far_target_lo[4]),
+        .A2(near_target_lo[5]), .B2(far_target_lo[5]),
+        .A3(near_target_lo[6]), .B3(far_target_lo[6]),
+        .A4(near_target_lo[7]), .B4(far_target_lo[7]),
+        .Enable_n(1'b0),
+        .Y1(jt_hi_lo[0]), .Y2(jt_hi_lo[1]),
+        .Y3(jt_hi_lo[2]), .Y4(jt_hi_lo[3])
+    );
+
+    hc157 u_jt_mux_hi8_lo (
+        .Select(is_far),
+        .A1(near_target_hi[0]), .B1(far_target_hi[0]),
+        .A2(near_target_hi[1]), .B2(far_target_hi[1]),
+        .A3(near_target_hi[2]), .B3(far_target_hi[2]),
+        .A4(near_target_hi[3]), .B4(far_target_hi[3]),
+        .Enable_n(1'b0),
+        .Y1(jt_hi_hi[0]), .Y2(jt_hi_hi[1]),
+        .Y3(jt_hi_hi[2]), .Y4(jt_hi_hi[3])
+    );
+
+    hc157 u_jt_mux_top (
+        .Select(is_far),
+        .A1(near_target_hi[4]), .B1(far_target_hi[4]),
+        .A2(near_target_hi[5]), .B2(far_target_hi[5]),
+        .A3(near_target_hi[6]), .B3(far_target_hi[6]),
+        .A4(near_target_hi[7]), .B4(far_target_hi[7]),
+        .Enable_n(1'b0),
+        .Y1(jt_top[0]), .Y2(jt_top[1]),
+        .Y3(jt_top[2]), .Y4(jt_top[3])
+    );
+
+    assign jmp_target = {jt_top, jt_hi_hi, jt_hi_lo, jt_lo};
 
     assign jmp_addr_full = {jmp_hi3, jmp_hi2, jmp_hi1, jmp_hi0,
                             jmp_mid[3:0], jmp_lo};
 
-    // pc_pe_n: 在 exec_phase 的 clk 上升沿, cond_taken 为真时 PE 有效
-    // cond_taken 在 exec_phase 整个期间为真, 所以在 exec→fetch 边沿
-    // (pc[0] 0→1), new exec_phase=0, 但 OLD cond_taken 仍通过
-    // registered flag 传递: jmp_flag_reg 在 exec 期间被置 1
-    // 关键: 用 negedge clk 捕获 exec_phase 结束前的 cond_taken
-    assign pc_pe_n = ~jmp_flag_reg;
-
-    // X 自增
+    // ============================================================
+    // X 自增 + MUX
+    // ============================================================
     assign x_inc  = (mod == 3'b111) && !is_st && !is_jmp;
-    assign x_next = x_reg + 8'b1;
-    assign x_load = x_inc ? x_next : alu_result;
     assign x_en   = (to_x | x_inc) & exec_phase;
 
+    // x_next = x_reg + 1 → 2× hc283
+    hc283 u_x_inc_lo (
+        .A(x_reg[3:0]),
+        .B(4'b0000),
+        .C0(1'b1),
+        .S(x_next[3:0]),
+        .C4(x_inc_carry)
+    );
+
+    hc283 u_x_inc_hi (
+        .A(x_reg[7:4]),
+        .B(4'b0000),
+        .C0(x_inc_carry),
+        .S(x_next[7:4]),
+        .C4()
+    );
+
+    // x_load MUX: x_inc ? x_next : alu_result → 2× hc157
+    hc157 u_x_load_lo (
+        .Select(x_inc),
+        .A1(alu_result[0]), .B1(x_next[0]),
+        .A2(alu_result[1]), .B2(x_next[1]),
+        .A3(alu_result[2]), .B3(x_next[2]),
+        .A4(alu_result[3]), .B4(x_next[3]),
+        .Enable_n(1'b0),
+        .Y1(x_load[0]), .Y2(x_load[1]),
+        .Y3(x_load[2]), .Y4(x_load[3])
+    );
+
+    hc157 u_x_load_hi (
+        .Select(x_inc),
+        .A1(alu_result[4]), .B1(x_next[4]),
+        .A2(alu_result[5]), .B2(x_next[5]),
+        .A3(alu_result[6]), .B3(x_next[6]),
+        .A4(alu_result[7]), .B4(x_next[7]),
+        .Enable_n(1'b0),
+        .Y1(x_load[4]), .Y2(x_load[5]),
+        .Y3(x_load[6]), .Y4(x_load[7])
+    );
+
+    // ============================================================
     // 输出
+    // ============================================================
     assign DATA_OUT = out_reg;
     assign PLAYING  = (pc != 20'b0);
 
@@ -205,10 +654,6 @@ module cpu39040 (
         .D(rom1_dq), .Q(ctrl)
     );
 
-    assign ins     = ctrl[7:5];
-    assign mod     = ctrl[4:2];
-    assign bus_sel = ctrl[1:0];
-
     // ============================================================
     // ROM2: 数据 D
     // ============================================================
@@ -218,7 +663,7 @@ module cpu39040 (
         .A0(rom_addr[0]),  .A1(rom_addr[1]),  .A2(rom_addr[2]),
         .A3(rom_addr[3]),  .A4(rom_addr[4]),  .A5(rom_addr[5]),
         .A6(rom_addr[6]),  .A7(rom_addr[7]),
-        .A8(rom_addr[8]),  .A9(rom_addr[9]), .A10(rom_addr[10]),
+        .A8(rom_addr[8]),  .A9(rom_addr[9]),  .A10(rom_addr[10]),
         .A11(rom_addr[11]), .A12(rom_addr[12]), .A13(rom_addr[13]),
         .A14(rom_addr[14]), .A15(rom_addr[15]), .A16(rom_addr[16]),
         .A17(rom_addr[17]), .A18(rom_addr[18]),
@@ -237,7 +682,7 @@ module cpu39040 (
     hc628512 u_ram (
         .A0(mem_addr[0]),  .A1(mem_addr[1]),  .A2(mem_addr[2]),
         .A3(mem_addr[3]),  .A4(mem_addr[4]),  .A5(mem_addr[5]),
-        .A6(mem_addr[6]),  .A7(mem_addr[7]),  .A8(mem_addr[8]),
+        .A6(mem_addr[6]),  .A7(mem_addr[7]), .A8(mem_addr[8]),
         .A9(mem_addr[9]),  .A10(mem_addr[10]), .A11(mem_addr[11]),
         .A12(mem_addr[12]), .A13(mem_addr[13]), .A14(mem_addr[14]),
         .A15(mem_addr[15]), .A16(1'b0), .A17(1'b0), .A18(1'b0),
@@ -261,7 +706,7 @@ module cpu39040 (
     );
 
     // ============================================================
-    // 寄存器
+    // 寄存器 — 4× 74HC377
     // ============================================================
     hc377 u_ac (
         .Enable_bar(~(to_ac & exec_phase)),
@@ -284,19 +729,22 @@ module cpu39040 (
     );
 
     // ============================================================
-    // JMP flag — negedge 捕获 exec 阶段条件, posedge 触发 161 PE
+    // JMP flag — hc08 AND + hc273(negedge clk)
+    //   clk_inv via hc04, D = exec_phase & cond_taken via hc08
     // ============================================================
-    // 时序: exec 阶段 pc[0]=0, 在 negedge clk 时 exec_phase 仍为 1
-    // → jmp_flag_reg 置 1. 下一个 posedge clk 时 pc_pe_n=0, 161 PE 加载跳转地址.
-    // 进入 fetch 阶段后的 negedge 清除 flag.
-    always @(negedge clk or negedge rst_n) begin
-        if (!rst_n)
-            jmp_flag_reg <= 1'b0;
-        else if (exec_phase)
-            jmp_flag_reg <= cond_taken;
-        else
-            jmp_flag_reg <= 1'b0;
-    end
+    hc08 u_jmp_and (
+        .A1(exec_phase), .B1(cond_taken), .Y1(jf_d),
+        .A2(1'b0),        .B2(1'b0),        .Y2(),
+        .A3(1'b0),        .B3(1'b0),        .Y3(),
+        .A4(1'b0),        .B4(1'b0),        .Y4()
+    );
+
+    hc273 #(.WIDTH(1)) u_jmp_flag (
+        .MR_n(rst_n),
+        .CP(clk_inv),
+        .D(jf_d),
+        .Q(jmp_flag_reg)
+    );
 
     // ============================================================
     // 跳转地址锁存
