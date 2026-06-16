@@ -35,31 +35,35 @@ ACC_WE  = 0b0000  # bit[2]=0 (写 acc) - 正确！
 CP273   = 0b0010  # bit[1]=1 (锁存输出)
 CLK174  = 0b0001  # bit[0]=1 (锁存 carry)
 
-# 修改后的 16-bit 微码字
-# 策略：sub0 加法 (clk174=1), sub2 写回 (acc_we=0), 不清零
+# 重新设计的微码 - 正确的 20-bit 累加流程
 #
-# sub0=1101: clk174=1, 加法
-# sub1=1111: 等待
-# sub2=1011: acc_we=0 (写回), cp273=1
-# sub3=1111: 等待
+# 每个 step (加法步骤):
+#   sub0: 1101 - clk174=1 (触发 carry 更新)
+#   sub1: 1111 - 等待 carry 稳定
+#   sub2: 0111 - acc_we=0 (写回 RAM), 但有清零！
+#   sub3: 1111 - 等待
 #
-# 计算: 1101 1111 1011 1111 = 0xDFBF
+# 问题：0111 有清零 (bit[3]=0)
+# 解决：用 1111 - acc_we=1, 不写回
+#
+# 策略改变：不通过微码写回，而是直接在 Verilog 中写回
+# 微码只负责控制 clk174 时序
 rom3m_16bit = [
-    0xDFBF,  # step 0
-    0xDFBF,  # step 1
-    0xDFBF,  # step 2
-    0xDFBF,  # step 3
-    0xDFBF,  # step 4
+    0xDFFF,  # step 0
+    0xDFFF,  # step 1
+    0xDFFF,  # step 2
+    0xDFFF,  # step 3
+    0xDFFF,  # step 4
     0xBFFF,  # step 5: 输出
-    0xDFBF,  # step 6
-    0xDFBF,  # step 7
-    0xDFBF,  # step 8
+    0xDFFF,  # step 6
+    0xDFFF,  # step 7
+    0xDFFF,  # step 8
     0xBFFF,  # step 9
-    0xDFBF,  # step A
-    0xDFBF,  # step B
-    0xDFBF,  # step C
-    0xDFBF,  # step D
-    0xDFBF,  # step E
+    0xDFFF,  # step A
+    0xDFFF,  # step B
+    0xDFFF,  # step C
+    0xDFFF,  # step D
+    0xDFFF,  # step E
     0xBFFF,  # step F
 ]
 
