@@ -12,20 +12,19 @@
 //   BUS: 0=D 1=RAM 2=AC 3=IN
 //
 // 芯片清单:
-//   5×161   — 20-bit PC 计数器
-//   4×377   — AC, X, Y, OUT 寄存器
+//   5×161    — 20-bit PC 计数器
+//   4×377    — AC, X, Y, OUT 寄存器
 //   3×39SF040 — ROM1(ctrl), ROM2(data), ROM3(ALU)
-//   1×628512 — SRAM
-//   3×273   — ctrl latch, d_reg latch, jmp flag
-//   1×174   — jmp address high bits
-//   2×04    — 反相器 (clk_inv + 通用)
-//   9×157   — bus MUX(6), mem_lo(1), mem_hi(1), x_load(1)
-//   2×283   — x_next incrementer
-//   2×85    — carry_flag 8-bit comparator
-//   1×08    — jmp flag AND gate
-//   1×32    — cond_taken OR gates + use_y OR
-//   1×10    — cond_taken far-jump NAND3
-//   合计 34 片
+//   1×628512  — SRAM
+//   5×273    — ctrl latch, d_reg latch, jmp flag(1), jmp_lo, jmp_mid
+//   1×174    — jmp address high bits
+//   2×04     — 反相器 (clk_inv+exec_phase, pc_pe_n+is_st_inv+is_jmp_inv+ins0_inv+ins1_inv)
+//  16×157    — bus MUX(6), mem_lo(2), mem_hi(2), jmp_target(4), x_load(2)
+//   2×283    — x_next incrementer
+//   4×85     — carry_flag 8-bit comparator (ADD 2级 + SUB 2级)
+//   6×08     — ins_dec(2), carry_and1, cond_and, cond_final_and, jmp_and
+//   2×32     — use_y OR, cond_taken OR级联
+//   合计 42 片
 
 `timescale 1ns/1ps
 
@@ -109,15 +108,15 @@ module cpu39040 (
     // ============================================================
     wire is_st_inv, is_jmp_inv;
     wire pc_pe_n_pre;  // = ~jmp_flag_reg, will gate
-    wire _inv2_y3, _inv2_y4, _inv2_y5, _inv2_y6;
+    wire ins0_inv, ins1_inv;
 
     hc04 u_inv2 (
         .A1(jmp_flag_reg), .Y1(pc_pe_n_pre),
         .A2(is_st),        .Y2(is_st_inv),
         .A3(is_jmp),       .Y3(is_jmp_inv),
-        .A4(1'b0),         .Y4(_inv2_y4),
-        .A5(1'b0),         .Y5(_inv2_y5),
-        .A6(1'b0),         .Y6(_inv2_y6)
+        .A4(ins[0]),       .Y4(ins0_inv),
+        .A5(ins[1]),       .Y5(ins1_inv),
+        .A6(1'b0),         .Y6()
     );
 
     assign pc_pe_n = pc_pe_n_pre;  // = ~jmp_flag_reg
@@ -143,8 +142,7 @@ module cpu39040 (
     );
 
     // is_st = ins[2]&ins[1]&~ins[0] → 用 04 反转 ins[0], 再 AND
-    wire ins0_inv;
-    assign ins0_inv = ~ins[0];  // behavioral, 可后续改 hc04
+    // ins0_inv 由 u_inv2 A4 提供
 
     hc08 u_ins_dec2 (
         .A1(ins2_and_ins1), .B1(ins0_inv), .Y1(is_st_pre),
@@ -371,15 +369,13 @@ module cpu39040 (
     // 即: ins[2]=1 & ins[1]=0 → is_add_or_sub
     // 然后用 ins[0] 区分 ADD vs SUB
     wire is_add_or_sub;
-    assign is_add_or_sub = ins[2] & ~ins[1];
-
-    wire add_carry_w, sub_borrow_w;
-    // add_carry_w = is_add_or_sub & ~ins[0] & add_lt_full
+    // is_add_or_sub = ins[2] & ~ins[1], 用 u_carry_and1 的一个 AND 门
+    // ins1_inv 由 u_inv2 A5 提供
     hc08 u_carry_and1 (
-        .A1(is_add_or_sub), .B1(~ins[0]),     .Y1(),  // 中间, 不直接用
-        .A2(is_add_or_sub), .B2(ins[0]),        .Y2(),
-        .A3(1'b0),           .B3(1'b0),           .Y3(),
-        .A4(1'b0),           .B4(1'b0),           .Y4()
+        .A1(ins[2]),      .B1(ins1_inv),     .Y1(is_add_or_sub),
+        .A2(1'b0),         .B2(1'b0),         .Y2(),
+        .A3(1'b0),         .B3(1'b0),         .Y3(),
+        .A4(1'b0),         .B4(1'b0),         .Y4()
     );
 
     // 简化: 用 behavioral assign 做 carry_flag 最终选择
@@ -402,20 +398,8 @@ module cpu39040 (
     //   然后 OR 4 terms, AND with is_jmp
     // ============================================================
 
-    // far: mod==000 = ~mod[0] & ~mod[1] & ~mod[2]
-    //   用 hc10 NAND3: Y = ~(~mod[0] & ~mod[1] & ~mod[2]) = mod[0]|mod[1]|mod[2]
-    //   反转得到 far = ~Y = ~(mod[0]|mod[1]|mod[2])
-    //   实际上 mod==000 就是 all zero, 用 NOR 更合适
-    //   但我们没有 hc02... 不, 刚写了 hc02!
-    wire far_term;
-    hc02 u_far_nor (
-        .A1(mod[0]),  .B1(mod[1]),  .Y1(far_term),
-        .A2(mod[2]),  .B2(far_term), .Y2(),
-        .A3(1'b0),    .B3(1'b0),    .Y3(),
-        .A4(1'b0),    .B4(1'b0),    .Y4()
-    );
-    // far_term = ~(mod[0]|mod[1]), 然后 Y2 = ~(mod[2]|far_term) = ~(mod[0]|mod[1]|mod[2])
-    // 这才是 far = all zero
+    // far: mod==000 = ~(mod[0] | mod[1] | mod[2])
+    //   3-input NOR 用 behavioral (两级 NOR 级联不等价于 3-input NOR)
     wire is_far_nor;
     assign is_far_nor = ~(mod[0] | mod[1] | mod[2]);
 
@@ -428,27 +412,11 @@ module cpu39040 (
         .A4(1'b0),        .B4(1'b0),        .Y4()
     );
 
-    // OR 4 terms + AND with is_jmp
-    // 用 2× hc32: 第一片 OR 4 terms (但 hc32 只有 4 路, 够用)
-    wire cond_or3, cond_or_all;
-    hc32 u_cond_or (
-        .A1(is_far_nor),  .B1(carry_term), .Y1(cond_or3),
-        .A2(cond_or3),    .B2(zero_term),  .Y2(cond_or_all),
-        .A3(cond_or_all), .B3(neg_term),   .Y3(cond_or_all),
-        .A4(1'b0),        .B4(1'b0),        .Y4()
-    );
-
-    // 注意: Y3 重新驱动 cond_or_all (4-input OR: a|b|c|d = (a|b)|(c|d))
-    // 但这样 Y2 和 Y3 同时驱动 cond_or_all 会冲突! 改用 behavioral
-    // 实际上 4-input OR 可以用两个 hc32 级联:
-    //   temp = is_far_nor | carry_term (hc32#1 Y1)
-    //   temp2 = temp | zero_term  (hc32#1 Y2)
-    //   cond_or = temp2 | neg_term (hc32#1 Y3)
-    // 但这样只有 1 片 hc32, 利用 3 路做级联 OR
+    // OR 4 terms: 级联 OR 用 hc32 的 3 路门
 
     // 修正: 用 assign 避免多驱动, hc32 实例只做前级
     wire cond_or1, cond_or2, cond_or3_r;
-    hc32 u_cond_or1 (
+    hc32 u_cond_or (
         .A1(is_far_nor), .B1(carry_term), .Y1(cond_or1),
         .A2(cond_or1),   .B2(zero_term),  .Y2(cond_or2),
         .A3(cond_or2),   .B3(neg_term),   .Y3(cond_or3_r),
