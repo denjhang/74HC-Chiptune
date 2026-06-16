@@ -33,25 +33,26 @@ CP273   = 0b0010  # bit[1]=1 (锁存输出)
 CLK174  = 0b0001  # bit[0]=1 (锁存 carry)
 
 # 修改后的 16-bit 微码字
-#   step 0 (ch0 nibble 0, clear + write acc):  1101_1110_1111_0011 = 0xDE73
+# 实验: 移除 step 0/6/B 的清零操作，让 carry_chain 跨周期累加
+#   step 0 (ch0 nibble 0, NO clear):      1101_1110_1111_1111 = 0xDEFF
 #   step 1-4 (ch0 nibble 1-4):           1101_1110_1111_1111 = 0xDEFF
 #   step 5 (ch0 output):                 1011_1111_1111_1111 = 0xBFFF
-#   step 6, B (ch1/ch2 nibble 0, clear+write): 0xDE73
+#   step 6 (ch1 nibble 0, NO clear):     1101_1110_1111_1111 = 0xDEFF
 #   step 7-9, C-E:                       0xDEFF
 #   step A, F (ch1/ch2 output):          0xBFFF
 rom3m_16bit = [
-    0xDEF7,  # step 0: ch0 nibble 0, clear adder
+    0xDEFF,  # step 0: ch0 nibble 0, NO CLEAR
     0xDEFF,  # step 1: ch0 nibble 1
     0xDEFF,  # step 2: ch0 nibble 2
     0xDEFF,  # step 3: ch0 nibble 3
     0xDEFF,  # step 4: ch0 nibble 4 (5 nibbles = 20-bit)
     0xBFFF,  # step 5: ch0 output
-    0xDEF7,  # step 6: ch1 nibble 0, clear adder
+    0xDEFF,  # step 6: ch1 nibble 0, NO CLEAR
     0xDEFF,  # step 7: ch1 nibble 1
     0xDEFF,  # step 8: ch1 nibble 2
     0xDEFF,  # step 9: ch1 nibble 3
     0xBFFF,  # step A: ch1 output
-    0xDEF7,  # step B: ch2 nibble 0, clear adder
+    0xDEFF,  # step B: ch2 nibble 0, NO CLEAR
     0xDEFF,  # step C: ch2 nibble 1
     0xDEFF,  # step D: ch2 nibble 2
     0xDEFF,  # step E: ch2 nibble 3

@@ -273,13 +273,37 @@ module wsg3_core (
     // ============================================================
     // U10: 39SF040 — 1M 波形 ROM
     //   地址: A[2:0] = acc_dout[2:0] (波形号, 来自 acc RAM[5])
-    //         A[7:3] = 累加器低 5 位: {U6[1][0], U6[0][3:0]}
-    //   修复: 相位 = 20-bit 累加器的低 5-bit, 不是 carry_chain
+    //         A[4:0] = 累加器相位低 5 位
+    //   真正的 20-bit 累加器 = {acc[4], acc[3], acc[2], acc[1], acc[0]}
+    //   相位低 5 位 = {acc[1][0], acc[0][3:0]}
+    //   问题: TDM 只能读一个 nibble，无法同时读 acc[0] 和 acc[1]
+    //   解决: 在 step 4 锁存 acc[0]，在 step 5 使用锁存值
     // ============================================================
     wire [7:0] rom1m_data;
     wire [3:0] wave_sample = rom1m_data[3:0];
 
     wire [2:0] wave_sel  = acc_dout[2:0];
+
+    // 锁存 acc[0] (在 step 4 读取)
+    reg [3:0] acc0_latch;
+    always @(posedge SPFM_CLK or negedge SPFM_RST_n) begin
+        if (!SPFM_RST_n)
+            acc0_latch <= 4'b0;
+        else if (tdm_step == 4'd4)
+            acc0_latch <= acc_dout;
+    end
+
+    // 锁存 acc[1] (在 step 5 读取，用于下一周期)
+    reg [3:0] acc1_latch;
+    always @(posedge SPFM_CLK or negedge SPFM_RST_n) begin
+        if (!SPFM_RST_n)
+            acc1_latch <= 4'b0;
+        else if (tdm_step == 4'd5 && sub_cyc == 2'd0)  // step 5 sub0
+            acc1_latch <= acc_dout;  // 此时 acc_dout = U6[5] = ch1 acc[0]
+    end
+
+    // 这还是不对！step 5 读取的是 U6[5] (ch1 的 acc[0])，不是 ch0 的 acc[1]
+    // 暂时用 carry_chain[4:0]，等待进一步分析
     wire [4:0] phase_sel = carry_chain[4:0];
 
     hc39sf040 #(.ADDR_WIDTH(19), .DATA_WIDTH(8), .INIT_FILE("rom/wsg3_prom1m.hex"))
