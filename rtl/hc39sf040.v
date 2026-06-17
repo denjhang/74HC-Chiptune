@@ -63,7 +63,8 @@ module hc39sf040 #(
                         A10, A9, A8, A7, A6, A5, A4, A3, A2, A1, A0};
 
     // 读操作: CE#=0 且 OE#=0 时输出数据
-    // 硬件 tAA=55/70ns, 仿真中直接组合输出
-    assign DQ = (!CE_n && !OE_n) ? mem[addr] : 8'hzz;
+    // 硬件 tAA=55ns (SST39SF040A-55), 仿真中建模此延迟
+    // 延迟确保 posedge 时 FF 采样的仍是旧地址的数据
+    assign #55 DQ = (!CE_n && !OE_n) ? mem[addr] : 8'hzz;
 
 endmodule
