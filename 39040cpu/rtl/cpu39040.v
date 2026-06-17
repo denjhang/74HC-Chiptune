@@ -1,16 +1,19 @@
-// cpu39040.v — 39040cpu: 查表机 + 加减法 (9 片, 零隐藏门)
+// cpu39040.v — 39040cpu: 查表机 + 加减法 + SRAM (15 片, 零隐藏门)
 //
-// 架构: 微指令驱动, PC 直接寻址 ROM, 无锁存, 无 MUX
+// 架构: 微指令驱动, PC 直接寻址 ROM, 无锁存, 无04反相
 //   3×39SF040: uctl(控制) + udata(立即数) + alu(查表)
 //   5× 74HC161 — 20-bit PC
-//   1× 74HC377 — AC
+//   2× 74HC377 — AC 累加器, X 地址寄存器
+//   4× 74HC157 — bus MUX (udata/ram_do), addr MUX (udata/x_reg)
+//   1× HC62256 — SRAM
 //
-// 所有操作经过 ALU 查表, 不需要 AC 输入 MUX
-//   LD x  = alu_op=000 → ALU 输出 udata (直通)
-//   ADD x = alu_op=001 → ALU 输出 AC + udata
-//   SUB x = alu_op=010 → ALU 输出 AC - udata
-//
-// uctl 格式: [0]ac_dis  [3:1]alu_op  [7:4]预留
+// uctl 格式 (8-bit, 负逻辑编码, 直接连芯片低有效引脚):
+//   [0]   ac_dis_n  (1=禁止AC锁存, 直连 377 Enable_bar)
+//   [3:1] alu_op    (000=直通, 001=ADD, 010=SUB)
+//   [4]   bus_sel   (0=udata, 1=ram_do) → 157 Select
+//   [5]   ram_we_n  (0=写SRAM, 直连 62256 WE_n)
+//   [6]   mem_sel   (0=udata做地址, 1=x_reg做地址) → 157 Select
+//   [7]   to_x_n    (0=锁存x_reg, 直连 377 Enable_bar)
 
 `timescale 1ns/1ps
 
@@ -49,7 +52,6 @@ module cpu39040 (
 
     // ============================================================
     // ROM: udata — PC 直接寻址
-    //   [7:0] 立即数 (全 8 bit 可用)
     // ============================================================
     wire [7:0] udata;
     hc39sf040 #(.INIT_FILE("rom/udata.hex")) u_rom_udata (
@@ -62,9 +64,7 @@ module cpu39040 (
     );
 
     // ============================================================
-    // ROM: uctl — PC 直接寻址
-    //   [0] ac_dis (1=禁止AC锁存, 直连 377 Enable_bar)
-    //   [3:1] alu_op[2:0]
+    // ROM: uctl — PC 直接寻址 (负逻辑编码)
     // ============================================================
     wire [7:0] uctl;
     hc39sf040 #(.INIT_FILE("rom/uctl.hex")) u_rom_uctl (
@@ -76,19 +76,91 @@ module cpu39040 (
         .DQ(uctl), .CE_n(1'b0), .OE_n(1'b0), .WE_n(1'b1)
     );
 
-    // 控制信号: 直连 uctl ROM (组合逻辑, 无锁存)
-    wire       ac_dis = uctl[0];
-    wire [2:0] alu_op = uctl[3:1];
+    // 控制信号: 直连 uctl ROM (零解码门, 低有效信号直接连引脚)
+    wire       ac_dis_n = uctl[0];  // 直连 377 Enable_bar
+    wire [2:0] alu_op   = uctl[3:1];
+    wire       bus_sel  = uctl[4];  // 直连 157 Select
+    wire       ram_we_n = uctl[5];  // 直连 62256 WE_n (0=写)
+    wire       mem_sel  = uctl[6];  // 直连 157 Select
+    wire       to_x_n   = uctl[7];  // 直连 377 Enable_bar (0=锁存)
+
+    // 前向声明
+    wire [7:0] ac;
+
+    // ============================================================
+    // SRAM 地址 MUX — 2× HC157
+    // ============================================================
+    wire [7:0] x_reg;
+    wire m0, m1, m2, m3, m4, m5, m6, m7;
+    hc157 u_mux_mem_lo (
+        .Select(mem_sel),
+        .A1(udata[0]), .B1(x_reg[0]),
+        .A2(udata[1]), .B2(x_reg[1]),
+        .A3(udata[2]), .B3(x_reg[2]),
+        .A4(udata[3]), .B4(x_reg[3]),
+        .Enable_n(1'b0),
+        .Y1(m0), .Y2(m1), .Y3(m2), .Y4(m3)
+    );
+    hc157 u_mux_mem_hi (
+        .Select(mem_sel),
+        .A1(udata[4]), .B1(x_reg[4]),
+        .A2(udata[5]), .B2(x_reg[5]),
+        .A3(udata[6]), .B3(x_reg[6]),
+        .A4(udata[7]), .B4(x_reg[7]),
+        .Enable_n(1'b0),
+        .Y1(m4), .Y2(m5), .Y3(m6), .Y4(m7)
+    );
+    wire [7:0] mem_addr_lo = {m7, m6, m5, m4, m3, m2, m1, m0};
+
+    // ============================================================
+    // SRAM — HC62256 (32K×8)
+    //   WE_n 直连 uctl[5] (ram_we_n), 0=写
+    // ============================================================
+    wire [7:0] ram_do;
+    hc62256 u_ram (
+        .A0(mem_addr_lo[0]),  .A1(mem_addr_lo[1]),  .A2(mem_addr_lo[2]),
+        .A3(mem_addr_lo[3]),  .A4(mem_addr_lo[4]),  .A5(mem_addr_lo[5]),
+        .A6(mem_addr_lo[6]),  .A7(mem_addr_lo[7]),
+        .A8(1'b0), .A9(1'b0), .A10(1'b0), .A11(1'b0),
+        .A12(1'b0), .A13(1'b0), .A14(1'b0),
+        .DI(ac),
+        .DO(ram_do),
+        .CE_n(1'b0), .OE_n(1'b0), .WE_n(ram_we_n)
+    );
+
+    // ============================================================
+    // bus MUX — 2× HC157
+    // ============================================================
+    wire [7:0] alu_d;
+    wire b0, b1, b2, b3, b4, b5, b6, b7;
+    hc157 u_mux_bus_lo (
+        .Select(bus_sel),
+        .A1(udata[0]), .B1(ram_do[0]),
+        .A2(udata[1]), .B2(ram_do[1]),
+        .A3(udata[2]), .B3(ram_do[2]),
+        .A4(udata[3]), .B4(ram_do[3]),
+        .Enable_n(1'b0),
+        .Y1(b0), .Y2(b1), .Y3(b2), .Y4(b3)
+    );
+    hc157 u_mux_bus_hi (
+        .Select(bus_sel),
+        .A1(udata[4]), .B1(ram_do[4]),
+        .A2(udata[5]), .B2(ram_do[5]),
+        .A3(udata[6]), .B3(ram_do[6]),
+        .A4(udata[7]), .B4(ram_do[7]),
+        .Enable_n(1'b0),
+        .Y1(b4), .Y2(b5), .Y3(b6), .Y4(b7)
+    );
+    assign alu_d = {b7, b6, b5, b4, b3, b2, b1, b0};
 
     // ============================================================
     // ROM: ALU 查表
-    //   地址: udata[7:0] | AC[7:0] | alu_op[2:0]
+    //   地址: alu_d[7:0] | AC[7:0] | alu_op[2:0]
     // ============================================================
-    wire [7:0] ac;
     wire [7:0] alu_result;
     hc39sf040 #(.INIT_FILE("rom/alu.hex")) u_rom_alu (
-        .A0(udata[0]),  .A1(udata[1]),  .A2(udata[2]),  .A3(udata[3]),
-        .A4(udata[4]),  .A5(udata[5]),  .A6(udata[6]),  .A7(udata[7]),
+        .A0(alu_d[0]),  .A1(alu_d[1]),  .A2(alu_d[2]),  .A3(alu_d[3]),
+        .A4(alu_d[4]),  .A5(alu_d[5]),  .A6(alu_d[6]),  .A7(alu_d[7]),
         .A8(ac[0]),      .A9(ac[1]),      .A10(ac[2]),    .A11(ac[3]),
         .A12(ac[4]),     .A13(ac[5]),    .A14(ac[6]),    .A15(ac[7]),
         .A16(alu_op[0]), .A17(alu_op[1]), .A18(alu_op[2]),
@@ -97,13 +169,22 @@ module cpu39040 (
 
     // ============================================================
     // AC 累加器 — 377
-    //   输入 = alu_result (所有操作经过 ALU 查表, 无需 MUX)
-    //   Enable_bar = ac_dis (直连 uctl[0], 1=禁止)
+    //   Enable_bar 直连 uctl[0] (ac_dis_n)
     // ============================================================
     hc377 u_ac (
-        .Enable_bar(ac_dis),
+        .Enable_bar(ac_dis_n),
         .D(alu_result),
         .Clk(clk), .Q(ac)
+    );
+
+    // ============================================================
+    // X 地址寄存器 — 377
+    //   Enable_bar 直连 uctl[7] (to_x_n, 0=锁存)
+    // ============================================================
+    hc377 u_x (
+        .Enable_bar(to_x_n),
+        .D(alu_result),
+        .Clk(clk), .Q(x_reg)
     );
 
     assign DATA_OUT = ac;

@@ -14,7 +14,7 @@ module cpu39040_tb;
     always #500 CLK = ~CLK;
 
     integer i;
-    reg [7:0] expected[0:7];
+    reg [7:0] expected[0:8];
     reg [7:0] got;
     reg is_ok;
 
@@ -27,22 +27,22 @@ module cpu39040_tb;
         RST_n = 1;
         #500;
 
-        expected[0] = 8'h42;
-        expected[1] = 8'h4C;
-        expected[2] = 8'h60;
-        expected[3] = 8'h40;
-        expected[4] = 8'h0F;
-        expected[5] = 8'h0A;
-        expected[6] = 8'hFF;
-        expected[7] = 8'h00;
+        expected[0] = 8'h01;  // LD 0x01
+        expected[1] = 8'h01;  // ST [0x80] — AC不变
+        expected[2] = 8'h05;  // LD 0x05
+        expected[3] = 8'h06;  // ADD [0x80] = 5+1
+        expected[4] = 8'h06;  // ST [0x81] — AC不变
+        expected[5] = 8'h01;  // LD [0x80]
+        expected[6] = 8'h07;  // ADD [0x81] = 1+6
+        expected[7] = 8'h03;  // LD 0x03
+        expected[8] = 8'h09;  // ADD [0x81] = 3+6
 
-        $display("=== 39040cpu LD/ADD/SUB (6-chip, ROM tAA=55ns) ===");
+        $display("=== 39040cpu SRAM read/write (15-chip) ===");
 
-        // 跳过 NOP(PC=0) — 1 cycle
         @(posedge CLK);
 
         is_ok = 1'b1;
-        for (i = 0; i < 8; i = i + 1) begin
+        for (i = 0; i < 9; i = i + 1) begin
             @(posedge CLK);
             #100;
             got = DATA_OUT;

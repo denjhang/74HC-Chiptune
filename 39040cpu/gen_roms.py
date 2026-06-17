@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
-"""gen_roms.py — 生成微指令 ROM (PC 直接寻址, 6 片版)
+"""gen_roms.py — 生成微指令 ROM (PC 直接寻址, 15 片版含 SRAM)
 
-6 片: 2×161 + 3×39SF040 + 1×377
-无 MUX — 所有操作经过 ALU 查表 (LD = alu_op=000 直通)
+15 片: 5×161 + 3×39SF040 + 2×377 + 4×157 + 1×62256 (无04!)
 
-uctl 格式: [0]ac_dis  [3:1]alu_op
-  NOP  = 0x01 (ac_dis=1)
-  LD x = 0x00 (ac_dis=0, alu_op=000, ALU 直通 udata)
-  ADD x = 0x02 (ac_dis=0, alu_op=001)
-  SUB x = 0x04 (ac_dis=0, alu_op=010)
+uctl 格式 (8-bit, 负逻辑编码, 直连芯片低有效引脚):
+  [0]   ac_dis_n  (1=禁止AC锁存, 直连 377 Enable_bar)
+  [3:1] alu_op    (000=直通, 001=ADD, 010=SUB)
+  [4]   bus_sel   (0=udata, 1=ram_do)
+  [5]   ram_we_n  (0=写SRAM, 直连 62256 WE_n)
+  [6]   mem_sel   (0=udata做地址, 1=x_reg做地址)
+  [7]   to_x_n    (0=锁存x_reg, 直连 377 Enable_bar)
 
-udata 格式: [7:0] 立即数
+指令编码 (所有非ST指令 bit5=1 即 ram_we_n=1 确保读模式):
+  NOP       uctl=0x21  (ac_dis_n=1, ram_we_n=1)
+  LD #imm   uctl=0x20  (alu_op=000, bus_sel=0, ram_we_n=1)
+  ADD #imm  uctl=0x22  (alu_op=001, bus_sel=0, ram_we_n=1)
+  SUB #imm  uctl=0x24  (alu_op=010, bus_sel=0, ram_we_n=1)
+  LD [addr] uctl=0x30  (alu_op=000, bus_sel=1, ram_we_n=1)
+  ST [addr] uctl=0x01  (ac_dis_n=1, ram_we_n=0, 写SRAM, AC不变)
+  ADD [addr] uctl=0x32  (alu_op=001, bus_sel=1, ram_we_n=1)
+  SUB [addr] uctl=0x34  (alu_op=010, bus_sel=1, ram_we_n=1)
+  LD X      uctl=0x70  (alu_op=000, bus_sel=1, to_x_n=0, ram_we_n=1)
 """
 
 import os
@@ -19,7 +29,7 @@ os.makedirs("rom", exist_ok=True)
 
 # ============================================================
 # ALU ROM — 512K×8
-# 地址: udata[7:0] | AC[7:0] | alu_op[2:0]
+# 地址: alu_d[7:0] | AC[7:0] | alu_op[2:0]
 # ============================================================
 ALU_SIZE = 512 * 1024
 alu = bytearray(ALU_SIZE)
@@ -32,7 +42,7 @@ for addr in range(ALU_SIZE):
     elif op == 0b010:
         alu[addr] = (acc - d) & 0xFF
     else:
-        alu[addr] = d  # op=000 直通, 其他也直通
+        alu[addr] = d
 
 with open("rom/alu.hex", "w", newline="\n") as f:
     for i in range(0, ALU_SIZE, 16):
@@ -41,37 +51,31 @@ with open("rom/alu.hex", "w", newline="\n") as f:
 print("Generated rom/alu.hex (512K)")
 
 # ============================================================
-# 微指令 uctl + udata — PC 直接寻址
-#
-# PC=0: NOP (ac_dis=1, uctl=0x01)
-# PC=1: LD 0x42  uctl=0x00 udata=0x42
-# PC=2: ADD 0x0A uctl=0x02 udata=0x0A
-# PC=3: ADD 0x14 uctl=0x02 udata=0x14
-# PC=4: SUB 0x20 uctl=0x04 udata=0x20
-# PC=5: LD 0x0F  uctl=0x00 udata=0x0F
-# PC=6: SUB 0x05 uctl=0x04 udata=0x05
-# PC=7: LD 0xFF  uctl=0x00 udata=0xFF
-# PC=8: ADD 0x01 uctl=0x02 udata=0x01
+# 测试程序: SRAM 读写 + ADD
 # ============================================================
 uctl = bytearray(256)
 udata = bytearray(256)
 
-# PC=0 NOP
-uctl[0] = 0x01  # ac_dis=1
+# PC=0: NOP (ac_dis_n=1, ram_we_n=1)
+uctl[0] = 0x21
 
 steps = [
-    (1, 0x00, 0x42),  # LD 0x42
-    (2, 0x02, 0x0A),  # ADD 0x0A
-    (3, 0x02, 0x14),  # ADD 0x14
-    (4, 0x04, 0x20),  # SUB 0x20
-    (5, 0x00, 0x0F),  # LD 0x0F
-    (6, 0x04, 0x05),  # SUB 0x05
-    (7, 0x00, 0xFF),  # LD 0xFF
-    (8, 0x02, 0x01),  # ADD 0x01
+    # (PC, uctl, udata, comment)
+    (1, 0x20, 0x01, "LD 0x01"),        # ram_we_n=1, AC<=1
+    (2, 0x01, 0x80, "ST [0x80]"),      # ac_dis_n=1, ram_we_n=0, RAM[0x80]<=AC(=1)
+    (3, 0x20, 0x05, "LD 0x05"),        # ram_we_n=1, AC<=5
+    (4, 0x32, 0x80, "ADD [0x80]"),     # ram_we_n=1, AC<=5+RAM[0x80]=6
+    (5, 0x01, 0x81, "ST [0x81]"),      # ac_dis_n=1, ram_we_n=0, RAM[0x81]<=AC(=6)
+    (6, 0x30, 0x80, "LD [0x80]"),      # ram_we_n=1, AC<=RAM[0x80]=1
+    (7, 0x32, 0x81, "ADD [0x81]"),     # ram_we_n=1, AC<=1+RAM[0x81]=7
+    (8, 0x20, 0x03, "LD 0x03"),        # ram_we_n=1, AC<=3
+    (9, 0x32, 0x81, "ADD [0x81]"),     # ram_we_n=1, AC<=3+RAM[0x81]=9
 ]
-for addr, c, d in steps:
+
+for addr, c, d, comment in steps:
     uctl[addr] = c
     udata[addr] = d
+    print(f"  PC={addr}: uctl=0x{c:02x} udata=0x{d:02x}  ; {comment}")
 
 with open("rom/uctl.hex", "w", newline="\n") as f:
     for i in range(0, 256, 16):
@@ -82,5 +86,5 @@ with open("rom/udata.hex", "w", newline="\n") as f:
         chunk = udata[i:i+16]
         f.write(" ".join(f"{b:02x}" for b in chunk) + "\n")
 
-print("Generated rom/uctl.hex, rom/udata.hex")
-print("Expected: 42 -> 4C -> 60 -> 40 -> 0F -> 0A -> FF -> 00")
+print("\nGenerated rom/uctl.hex, rom/udata.hex")
+print("Expected (skip NOP): 01 01 05 06 06 01 07 03 09")
