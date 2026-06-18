@@ -1,36 +1,39 @@
 #!/usr/bin/env python3
-"""gen_roms.py — 生成微指令 ROM (PC 直接寻址, 15 片版含 SRAM)
+"""gen_roms.py — 生成微指令 ROM (PC 直接寻址, 18 片版含 JMP+OUT)
 
-15 片: 5×161 + 3×39SF040 + 2×377 + 4×157 + 1×62256 (无04!)
+18 片: 5×161 + 4×39SF040 + 3×377 + 4×157 + 1×62256
 
-uctl 格式 (8-bit, 负逻辑编码, 直连芯片低有效引脚):
-  [0]   ac_dis_n  (1=禁止AC锁存, 直连 377 Enable_bar)
+uctl_lo (8-bit, 负逻辑编码):
+  [0]   ac_dis_n  (1=禁止AC)
   [3:1] alu_op    (000=直通, 001=ADD, 010=SUB)
   [4]   bus_sel   (0=udata, 1=ram_do)
-  [5]   ram_we_n  (0=写SRAM, 直连 62256 WE_n)
-  [6]   mem_sel   (0=udata做地址, 1=x_reg做地址)
-  [7]   to_x_n    (0=锁存x_reg, 直连 377 Enable_bar)
+  [5]   ram_we_n  (0=写SRAM)
+  [6]   mem_sel   (0=udata地址, 1=x_reg地址)
+  [7]   to_x_n    (0=锁存x_reg)
 
-指令编码 (所有非ST指令 bit5=1 即 ram_we_n=1 确保读模式):
-  NOP       uctl=0x21  (ac_dis_n=1, ram_we_n=1)
-  LD #imm   uctl=0x20  (alu_op=000, bus_sel=0, ram_we_n=1)
-  ADD #imm  uctl=0x22  (alu_op=001, bus_sel=0, ram_we_n=1)
-  SUB #imm  uctl=0x24  (alu_op=010, bus_sel=0, ram_we_n=1)
-  LD [addr] uctl=0x30  (alu_op=000, bus_sel=1, ram_we_n=1)
-  ST [addr] uctl=0x01  (ac_dis_n=1, ram_we_n=0, 写SRAM, AC不变)
-  ADD [addr] uctl=0x32  (alu_op=001, bus_sel=1, ram_we_n=1)
-  SUB [addr] uctl=0x34  (alu_op=010, bus_sel=1, ram_we_n=1)
-  LD X      uctl=0x70  (alu_op=000, bus_sel=1, to_x_n=0, ram_we_n=1)
+uctl_hi (8-bit, 负逻辑编码):
+  [0]   pc_pe_n   (0=JMP, 直连 161 PE)
+  [1]   to_y_n    (0=锁存y_reg)
+  [2]   to_out_n  (0=锁存out_reg)
+
+指令编码:
+  NOP       lo=0x21 hi=0x01  (ac_dis=1, ram_we=1, pc_pe=1)
+  LD #imm   lo=0x20 hi=0x01  (ram_we=1)
+  ADD #imm  lo=0x22 hi=0x01  (alu_op=001, ram_we=1)
+  SUB #imm  lo=0x24 hi=0x01  (alu_op=010, ram_we=1)
+  LD [addr] lo=0x30 hi=0x01  (bus_sel=1, ram_we=1)
+  ST [addr] lo=0x01 hi=0x01  (ac_dis=1, ram_we=0)
+  ADD [addr] lo=0x32 hi=0x01  (alu_op=001, bus_sel=1, ram_we=1)
+  OUT       lo=0x21 hi=0x05  (ac_dis=1, to_out=0)
+  JMP addr  lo=0x21 hi=0x00  (ac_dis=1, pc_pe=0, addr={y,udata})
+  LD Y      lo=0x30 hi=0x03  (bus_sel=1, ram_we=1, to_y=0, 读ram到Y)
 """
 
 import os
 
 os.makedirs("rom", exist_ok=True)
 
-# ============================================================
-# ALU ROM — 512K×8
-# 地址: alu_d[7:0] | AC[7:0] | alu_op[2:0]
-# ============================================================
+# ALU ROM (不变)
 ALU_SIZE = 512 * 1024
 alu = bytearray(ALU_SIZE)
 for addr in range(ALU_SIZE):
@@ -51,40 +54,57 @@ with open("rom/alu.hex", "w", newline="\n") as f:
 print("Generated rom/alu.hex (512K)")
 
 # ============================================================
-# 测试程序: SRAM 读写 + ADD
+# 测试程序: JMP + OUT
+#
+# PC=0:  LD 0x0A       ; AC=10
+# PC=1:  OUT            ; out_reg=10, DATA_OUT=10
+# PC=2:  LD 0x01       ; AC=1
+# PC=3:  ST [0x80]     ; RAM[0x80]=1
+# PC=4:  LD [0x80]     ; AC=RAM[0x80]=1
+# PC=5:  ADD 0x01       ; AC=2
+# PC=6:  ST [0x80]     ; RAM[0x80]=2
+# PC=7:  OUT            ; out_reg=2, DATA_OUT=2
+# PC=8:  JMP 0x00       ; 跳到 PC=0 (无限循环)
+#
+# 有效输出: 10, 02, 02, 02, ...
 # ============================================================
-uctl = bytearray(256)
+uctl_lo = bytearray(256)
+uctl_hi = bytearray(256)
 udata = bytearray(256)
 
-# PC=0: NOP (ac_dis_n=1, ram_we_n=1)
-uctl[0] = 0x21
+NOP = (0x21, 0x01)
+LD_IMM = (0x20, 0x01)
+ADD_IMM = (0x22, 0x01)
+ST = (0x01, 0x01)
+LD_ADDR = (0x30, 0x01)
+ADD_ADDR = (0x32, 0x01)
+OUT = (0x21, 0x05)      # ac_dis_n=1, to_out_n=0
+JMP = (0x21, 0x00)      # ac_dis_n=1, pc_pe_n=0
 
 steps = [
-    # (PC, uctl, udata, comment)
-    (1, 0x20, 0x01, "LD 0x01"),        # ram_we_n=1, AC<=1
-    (2, 0x01, 0x80, "ST [0x80]"),      # ac_dis_n=1, ram_we_n=0, RAM[0x80]<=AC(=1)
-    (3, 0x20, 0x05, "LD 0x05"),        # ram_we_n=1, AC<=5
-    (4, 0x32, 0x80, "ADD [0x80]"),     # ram_we_n=1, AC<=5+RAM[0x80]=6
-    (5, 0x01, 0x81, "ST [0x81]"),      # ac_dis_n=1, ram_we_n=0, RAM[0x81]<=AC(=6)
-    (6, 0x30, 0x80, "LD [0x80]"),      # ram_we_n=1, AC<=RAM[0x80]=1
-    (7, 0x32, 0x81, "ADD [0x81]"),     # ram_we_n=1, AC<=1+RAM[0x81]=7
-    (8, 0x20, 0x03, "LD 0x03"),        # ram_we_n=1, AC<=3
-    (9, 0x32, 0x81, "ADD [0x81]"),     # ram_we_n=1, AC<=3+RAM[0x81]=9
+    # (PC, lo, hi, udata, comment)
+    (0, LD_IMM[0], LD_IMM[1], 0x0A, "LD 0x0A"),
+    (1, OUT[0],    OUT[1],    0x00, "OUT"),
+    (2, LD_IMM[0], LD_IMM[1], 0x01, "LD 0x01"),
+    (3, ST[0],     ST[1],     0x80, "ST [0x80]"),
+    (4, LD_ADDR[0], LD_ADDR[1], 0x80, "LD [0x80]"),
+    (5, ADD_IMM[0], ADD_IMM[1], 0x01, "ADD 0x01"),
+    (6, ST[0],     ST[1],     0x80, "ST [0x80]"),
+    (7, OUT[0],    OUT[1],    0x00, "OUT"),
+    (8, JMP[0],    JMP[1],    0x00, "JMP 0x00"),
 ]
 
-for addr, c, d, comment in steps:
-    uctl[addr] = c
+for addr, lo, hi, d, comment in steps:
+    uctl_lo[addr] = lo
+    uctl_hi[addr] = hi
     udata[addr] = d
-    print(f"  PC={addr}: uctl=0x{c:02x} udata=0x{d:02x}  ; {comment}")
+    print(f"  PC={addr}: lo=0x{lo:02x} hi=0x{hi:02x} udata=0x{d:02x}  ; {comment}")
 
-with open("rom/uctl.hex", "w", newline="\n") as f:
-    for i in range(0, 256, 16):
-        chunk = uctl[i:i+16]
-        f.write(" ".join(f"{b:02x}" for b in chunk) + "\n")
-with open("rom/udata.hex", "w", newline="\n") as f:
-    for i in range(0, 256, 16):
-        chunk = udata[i:i+16]
-        f.write(" ".join(f"{b:02x}" for b in chunk) + "\n")
+for fname, data in [("rom/uctl_lo.hex", uctl_lo), ("rom/uctl_hi.hex", uctl_hi), ("rom/udata.hex", udata)]:
+    with open(fname, "w", newline="\n") as f:
+        for i in range(0, 256, 16):
+            chunk = data[i:i+16]
+            f.write(" ".join(f"{b:02x}" for b in chunk) + "\n")
+    print(f"Generated {fname}")
 
-print("\nGenerated rom/uctl.hex, rom/udata.hex")
-print("Expected (skip NOP): 01 01 05 06 06 01 07 03 09")
+print("\nExpected (skip NOP): 0A, 02, 02, ... (loop)")

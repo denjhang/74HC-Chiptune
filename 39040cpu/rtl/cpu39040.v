@@ -1,19 +1,13 @@
-// cpu39040.v — 39040cpu: 查表机 + 加减法 + SRAM (15 片, 零隐藏门)
+// cpu39040.v — 39040cpu: 微指令 CPU + SRAM + JMP + OUT (18 片, 零隐藏门)
 //
-// 架构: 微指令驱动, PC 直接寻址 ROM, 无锁存, 无04反相
-//   3×39SF040: uctl(控制) + udata(立即数) + alu(查表)
-//   5× 74HC161 — 20-bit PC
-//   2× 74HC377 — AC 累加器, X 地址寄存器
-//   4× 74HC157 — bus MUX (udata/ram_do), addr MUX (udata/x_reg)
+//   4×39SF040: uctl_lo + uctl_hi + udata + alu
+//   5× 74HC161 — 20-bit PC (PE=JMP)
+//   4× 74HC377 — AC, X, Y, OUT
+//   4× 74HC157 — bus MUX, addr MUX
 //   1× HC62256 — SRAM
 //
-// uctl 格式 (8-bit, 负逻辑编码, 直接连芯片低有效引脚):
-//   [0]   ac_dis_n  (1=禁止AC锁存, 直连 377 Enable_bar)
-//   [3:1] alu_op    (000=直通, 001=ADD, 010=SUB)
-//   [4]   bus_sel   (0=udata, 1=ram_do) → 157 Select
-//   [5]   ram_we_n  (0=写SRAM, 直连 62256 WE_n)
-//   [6]   mem_sel   (0=udata做地址, 1=x_reg做地址) → 157 Select
-//   [7]   to_x_n    (0=锁存x_reg, 直连 377 Enable_bar)
+// uctl_lo: [0]ac_dis_n [3:1]alu_op [4]bus_sel [5]ram_we_n [6]mem_sel [7]to_x_n
+// uctl_hi: [0]pc_pe_n [1]to_y_n [2]to_out_n [7:3]预留
 
 `timescale 1ns/1ps
 
@@ -26,34 +20,31 @@ module cpu39040 (
     wire clk   = CLK;
     wire rst_n = RST_n;
 
-    // ============================================================
-    // 20-bit PC: 5× 74HC161
-    // ============================================================
+    // 前向声明 (PC 在 161 实例化后才可拼接, 但 ROM 需要先读)
+    wire [19:0] pc;
     wire [3:0] pc0_q, pc1_q, pc2_q, pc3_q, pc4_q;
     wire       tc0, tc1, tc2, tc3;
 
-    hc161 u_pc0 (.MR(rst_n), .CP(clk), .D0(1'b0), .D1(1'b0), .D2(1'b0), .D3(1'b0),
-        .Q0(pc0_q[0]), .Q1(pc0_q[1]), .Q2(pc0_q[2]), .Q3(pc0_q[3]),
-        .CEP(1'b1), .CET(1'b1), .PE(1'b1), .TC(tc0));
-    hc161 u_pc1 (.MR(rst_n), .CP(clk), .D0(1'b0), .D1(1'b0), .D2(1'b0), .D3(1'b0),
-        .Q0(pc1_q[0]), .Q1(pc1_q[1]), .Q2(pc1_q[2]), .Q3(pc1_q[3]),
-        .CEP(1'b1), .CET(tc0), .PE(1'b1), .TC(tc1));
-    hc161 u_pc2 (.MR(rst_n), .CP(clk), .D0(1'b0), .D1(1'b0), .D2(1'b0), .D3(1'b0),
-        .Q0(pc2_q[0]), .Q1(pc2_q[1]), .Q2(pc2_q[2]), .Q3(pc2_q[3]),
-        .CEP(1'b1), .CET(tc1), .PE(1'b1), .TC(tc2));
-    hc161 u_pc3 (.MR(rst_n), .CP(clk), .D0(1'b0), .D1(1'b0), .D2(1'b0), .D3(1'b0),
-        .Q0(pc3_q[0]), .Q1(pc3_q[1]), .Q2(pc3_q[2]), .Q3(pc3_q[3]),
-        .CEP(1'b1), .CET(tc2), .PE(1'b1), .TC(tc3));
-    hc161 u_pc4 (.MR(rst_n), .CP(clk), .D0(1'b0), .D1(1'b0), .D2(1'b0), .D3(1'b0),
-        .Q0(pc4_q[0]), .Q1(pc4_q[1]), .Q2(pc4_q[2]), .Q3(pc4_q[3]),
-        .CEP(1'b1), .CET(tc3), .PE(1'b1), .TC());
-
-    wire [19:0] pc = {pc4_q, pc3_q, pc2_q, pc1_q, pc0_q};
-
     // ============================================================
-    // ROM: udata — PC 直接寻址
+    // ROM: uctl_lo / uctl_hi / udata — PC 直接寻址
     // ============================================================
-    wire [7:0] udata;
+    wire [7:0] uctl_lo, uctl_hi, udata;
+    hc39sf040 #(.INIT_FILE("rom/uctl_lo.hex")) u_rom_uctl_lo (
+        .A0(pc[0]), .A1(pc[1]), .A2(pc[2]), .A3(pc[3]),
+        .A4(pc[4]), .A5(pc[5]), .A6(pc[6]), .A7(pc[7]),
+        .A8(pc[8]), .A9(pc[9]), .A10(pc[10]), .A11(pc[11]),
+        .A12(pc[12]), .A13(pc[13]), .A14(pc[14]), .A15(pc[15]),
+        .A16(pc[16]), .A17(pc[17]), .A18(pc[18]),
+        .DQ(uctl_lo), .CE_n(1'b0), .OE_n(1'b0), .WE_n(1'b1)
+    );
+    hc39sf040 #(.INIT_FILE("rom/uctl_hi.hex")) u_rom_uctl_hi (
+        .A0(pc[0]), .A1(pc[1]), .A2(pc[2]), .A3(pc[3]),
+        .A4(pc[4]), .A5(pc[5]), .A6(pc[6]), .A7(pc[7]),
+        .A8(pc[8]), .A9(pc[9]), .A10(pc[10]), .A11(pc[11]),
+        .A12(pc[12]), .A13(pc[13]), .A14(pc[14]), .A15(pc[15]),
+        .A16(pc[16]), .A17(pc[17]), .A18(pc[18]),
+        .DQ(uctl_hi), .CE_n(1'b0), .OE_n(1'b0), .WE_n(1'b1)
+    );
     hc39sf040 #(.INIT_FILE("rom/udata.hex")) u_rom_udata (
         .A0(pc[0]), .A1(pc[1]), .A2(pc[2]), .A3(pc[3]),
         .A4(pc[4]), .A5(pc[5]), .A6(pc[6]), .A7(pc[7]),
@@ -63,34 +54,52 @@ module cpu39040 (
         .DQ(udata), .CE_n(1'b0), .OE_n(1'b0), .WE_n(1'b1)
     );
 
-    // ============================================================
-    // ROM: uctl — PC 直接寻址 (负逻辑编码)
-    // ============================================================
-    wire [7:0] uctl;
-    hc39sf040 #(.INIT_FILE("rom/uctl.hex")) u_rom_uctl (
-        .A0(pc[0]), .A1(pc[1]), .A2(pc[2]), .A3(pc[3]),
-        .A4(pc[4]), .A5(pc[5]), .A6(pc[6]), .A7(pc[7]),
-        .A8(pc[8]), .A9(pc[9]), .A10(pc[10]), .A11(pc[11]),
-        .A12(pc[12]), .A13(pc[13]), .A14(pc[14]), .A15(pc[15]),
-        .A16(pc[16]), .A17(pc[17]), .A18(pc[18]),
-        .DQ(uctl), .CE_n(1'b0), .OE_n(1'b0), .WE_n(1'b1)
-    );
-
-    // 控制信号: 直连 uctl ROM (零解码门, 低有效信号直接连引脚)
-    wire       ac_dis_n = uctl[0];  // 直连 377 Enable_bar
-    wire [2:0] alu_op   = uctl[3:1];
-    wire       bus_sel  = uctl[4];  // 直连 157 Select
-    wire       ram_we_n = uctl[5];  // 直连 62256 WE_n (0=写)
-    wire       mem_sel  = uctl[6];  // 直连 157 Select
-    wire       to_x_n   = uctl[7];  // 直连 377 Enable_bar (0=锁存)
+    // 控制信号
+    wire       ac_dis_n = uctl_lo[0];
+    wire [2:0] alu_op   = uctl_lo[3:1];
+    wire       bus_sel  = uctl_lo[4];
+    wire       ram_we_n = uctl_lo[5];
+    wire       mem_sel  = uctl_lo[6];
+    wire       to_x_n   = uctl_lo[7];
+    wire       pc_pe_n  = uctl_hi[0];
+    wire       to_y_n   = uctl_hi[1];
+    wire       to_out_n = uctl_hi[2];
 
     // 前向声明
-    wire [7:0] ac;
+    wire [7:0] ac, x_reg, y_reg;
+
+    // JMP 地址
+    wire [15:0] jmp_addr = {8'b0, y_reg, udata};
+
+    // ============================================================
+    // 20-bit PC: 5× 74HC161 (PE=pc_pe_n, D=jmp_addr)
+    // ============================================================
+    hc161 u_pc0 (.MR(rst_n), .CP(clk),
+        .D0(jmp_addr[0]),  .D1(jmp_addr[1]),  .D2(jmp_addr[2]),  .D3(jmp_addr[3]),
+        .Q0(pc0_q[0]), .Q1(pc0_q[1]), .Q2(pc0_q[2]), .Q3(pc0_q[3]),
+        .CEP(1'b1), .CET(1'b1), .PE(pc_pe_n), .TC(tc0));
+    hc161 u_pc1 (.MR(rst_n), .CP(clk),
+        .D0(jmp_addr[4]),  .D1(jmp_addr[5]),  .D2(jmp_addr[6]),  .D3(jmp_addr[7]),
+        .Q0(pc1_q[0]), .Q1(pc1_q[1]), .Q2(pc1_q[2]), .Q3(pc1_q[3]),
+        .CEP(1'b1), .CET(tc0), .PE(pc_pe_n), .TC(tc1));
+    hc161 u_pc2 (.MR(rst_n), .CP(clk),
+        .D0(jmp_addr[8]),  .D1(jmp_addr[9]),  .D2(jmp_addr[10]), .D3(jmp_addr[11]),
+        .Q0(pc2_q[0]), .Q1(pc2_q[1]), .Q2(pc2_q[2]), .Q3(pc2_q[3]),
+        .CEP(1'b1), .CET(tc1), .PE(pc_pe_n), .TC(tc2));
+    hc161 u_pc3 (.MR(rst_n), .CP(clk),
+        .D0(jmp_addr[12]), .D1(jmp_addr[13]), .D2(jmp_addr[14]), .D3(jmp_addr[15]),
+        .Q0(pc3_q[0]), .Q1(pc3_q[1]), .Q2(pc3_q[2]), .Q3(pc3_q[3]),
+        .CEP(1'b1), .CET(tc2), .PE(pc_pe_n), .TC(tc3));
+    hc161 u_pc4 (.MR(rst_n), .CP(clk),
+        .D0(1'b0), .D1(1'b0), .D2(1'b0), .D3(1'b0),
+        .Q0(pc4_q[0]), .Q1(pc4_q[1]), .Q2(pc4_q[2]), .Q3(pc4_q[3]),
+        .CEP(1'b1), .CET(tc3), .PE(pc_pe_n), .TC());
+
+    assign pc = {pc4_q, pc3_q, pc2_q, pc1_q, pc0_q};
 
     // ============================================================
     // SRAM 地址 MUX — 2× HC157
     // ============================================================
-    wire [7:0] x_reg;
     wire m0, m1, m2, m3, m4, m5, m6, m7;
     hc157 u_mux_mem_lo (
         .Select(mem_sel),
@@ -114,7 +123,6 @@ module cpu39040 (
 
     // ============================================================
     // SRAM — HC62256 (32K×8)
-    //   WE_n 直连 uctl[5] (ram_we_n), 0=写
     // ============================================================
     wire [7:0] ram_do;
     hc62256 u_ram (
@@ -155,7 +163,6 @@ module cpu39040 (
 
     // ============================================================
     // ROM: ALU 查表
-    //   地址: alu_d[7:0] | AC[7:0] | alu_op[2:0]
     // ============================================================
     wire [7:0] alu_result;
     hc39sf040 #(.INIT_FILE("rom/alu.hex")) u_rom_alu (
@@ -168,8 +175,7 @@ module cpu39040 (
     );
 
     // ============================================================
-    // AC 累加器 — 377
-    //   Enable_bar 直连 uctl[0] (ac_dis_n)
+    // AC — 377
     // ============================================================
     hc377 u_ac (
         .Enable_bar(ac_dis_n),
@@ -177,16 +183,28 @@ module cpu39040 (
         .Clk(clk), .Q(ac)
     );
 
-    // ============================================================
-    // X 地址寄存器 — 377
-    //   Enable_bar 直连 uctl[7] (to_x_n, 0=锁存)
-    // ============================================================
+    // X — 377
     hc377 u_x (
         .Enable_bar(to_x_n),
         .D(alu_result),
         .Clk(clk), .Q(x_reg)
     );
 
-    assign DATA_OUT = ac;
+    // Y — 377 (JMP 高位地址)
+    hc377 u_y (
+        .Enable_bar(to_y_n),
+        .D(alu_result),
+        .Clk(clk), .Q(y_reg)
+    );
+
+    // OUT — 377
+    wire [7:0] out_reg;
+    hc377 u_out (
+        .Enable_bar(to_out_n),
+        .D(alu_result),
+        .Clk(clk), .Q(out_reg)
+    );
+
+    assign DATA_OUT = out_reg;
 
 endmodule
