@@ -3,8 +3,8 @@
 *.vcd
 
 # FT232H driver installer (large, redownloadable)
-psg_voice/CDM2123620_Setup.zip
-psg_voice/CDM2123620_Setup/
+**/CDM2123620_Setup.zip
+**/CDM2123620_Setup/
 
 # Archived scratch (sim outputs + version backups, regenerable)
 build/
