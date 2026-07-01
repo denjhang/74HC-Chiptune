@@ -220,8 +220,28 @@ class Voice:
 
 # ============== 简谱 -> 频率 ==============
 NOTE_SEMITONE = {1:0, 2:2, 3:4, 4:5, 5:7, 6:9, 7:11}
-def jianpu_freq(degree, octave):
-    midi = 12 * (octave + 1) + NOTE_SEMITONE[degree]
+
+# key 名 -> 相对 C 的半音偏移 (用于移调: key=F 表示 1(do)=F, 全曲 +5 半音)
+KEY_SEMITONE = {
+    'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3,
+    'E': 4, 'Fb': 4, 'E#': 5, 'F': 5, 'F#': 6, 'Gb': 6,
+    'G': 7, 'G#': 8, 'Ab': 8, 'A': 9, 'A#': 10, 'Bb': 10,
+    'B': 11, 'Cb': 11, 'B#': 0,
+}
+
+def _key_semi_to_name(semi):
+    """半音偏移 -> key 名 (用于显示). 0=C, 5=F, ..."""
+    names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+    return names[semi % 12]
+
+def jianpu_freq(degree, octave, key_semi=0, accidental=0):
+    """简谱 -> 频率.
+    degree: 1-7 (0=休止, 调用前过滤)
+    octave: 八度 (4 = C4 基准)
+    key_semi: 调号半音偏移 (key=F → +5), 0=C 大调
+    accidental: 音符级升降 (+1=升, -1=降, 0=还原)
+    """
+    midi = 12 * (octave + 1) + NOTE_SEMITONE[degree] + key_semi + accidental
     return 440.0 * (2 ** ((midi - 69) / 12.0))
 
 
@@ -232,8 +252,12 @@ INI_SONGS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'psg_songs.
 
 
 def parse_notes(text):
-    """解析 ini 的 notes 文本 -> [(degree, beats, oct_override_or_None), ...]
-    格式: '3:1 ^1:0.5 0:1 ,5:2'  (| 视为空格)"""
+    """解析 ini 的 notes 文本 -> [(degree, beats, oct_override_or_None, accidental, raw_tok), ...]
+    raw_tok 保留原始 token 文本 (含 ^/+/- 等), 用于播放时打印乐谱.
+    格式: '3:1 ^1:0.5 0:1 ,5:2 5+:1 6-:0.5'
+      音级后可带升降: + = 升半音, - = 降半音 (例: 5+ = sol#, 6- = lab)
+      ^ 高八度, , 低八度 (在音级前)
+      | 视为空格"""
     notes = []
     for tok in text.replace('|', ' ').split():
         oct_ov = None
@@ -246,6 +270,12 @@ def parse_notes(text):
             print(f"  (警告: 无法解析音符 '{tok}', 跳过)", flush=True)
             continue
         d_str, b_str = degree_str.split(':', 1)
+        # 提取升降号: d_str 形如 '5' / '5+' / '6-'
+        accidental = 0
+        if d_str and d_str[-1] == '+':
+            accidental = 1; d_str = d_str[:-1]
+        elif d_str and d_str[-1] == '-':
+            accidental = -1; d_str = d_str[:-1]
         try:
             d = int(d_str); b = float(b_str)
         except ValueError:
@@ -254,12 +284,35 @@ def parse_notes(text):
         if not (0 <= d <= 7):
             print(f"  (警告: 音级超范围 '{tok}', 跳过)", flush=True)
             continue
-        notes.append((d, b, oct_ov) if oct_ov else (d, b))
+        notes.append((d, b, oct_ov, accidental, tok))
     return notes
 
 
+def split_notes_lines(notes_text, notes):
+    """把音符按 ini 原始行分组 -> [[note, ...], ...], 每个子列表是一行.
+    用 notes_text 的换行和 token 顺序对齐 notes (parse_notes 已去掉了 |).
+    用于播放时按原始排版打印乐谱."""
+    # 按 configparser 多行值拆: 续行用 \n 连接, 每行的 token 数对应
+    lines = [ln for ln in notes_text.split('\n') if ln.strip()]
+    result = []
+    idx = 0
+    for ln in lines:
+        # 该行的音符 token 数 (去掉 | 后)
+        cnt = len([t for t in ln.replace('|', ' ').split()])
+        result.append(notes[idx:idx+cnt])
+        idx += cnt
+    # 若 token 总数对不上 (解析有跳过), 兜底: 剩余全放最后一行
+    if idx < len(notes):
+        if result:
+            result[-1].extend(notes[idx:])
+        else:
+            result.append(notes[idx:])
+    return result
+
+
 def load_songs():
-    """从 psg_songs.ini 加载曲目 -> [(name, base_octave, notes), ...] 按 song_N 排序."""
+    """从 psg_songs.ini 加载曲目 -> [(name, base_octave, key_semi, notes), ...] 按 song_N 排序.
+    key=C/D/E/F/G/A/B (可带 #/b), 决定全曲移调; 不写则默认 C (不移调)."""
     cp = configparser.ConfigParser()
     if not cp.read(INI_SONGS, encoding='utf-8'):
         print(f"(错误: 找不到曲目库 {INI_SONGS})")
@@ -277,10 +330,23 @@ def load_songs():
     for n, sec in items:
         name = cp.get(sec, 'name', fallback=f'未命名{n}')
         octave = cp.getint(sec, 'octave', fallback=4)
+        # key 移调: key=F → 全曲 +5 半音 (1=do 对应 F 而非 C)
+        # key 可带八度前缀: ^C 升一个八度, ,C 降一个八度
+        key_str = cp.get(sec, 'key', fallback='C').strip()
+        key_octave_shift = 0
+        key_name = key_str
+        if key_str.startswith('^'):
+            key_octave_shift = 1; key_name = key_str[1:]
+        elif key_str.startswith(','):
+            key_octave_shift = -1; key_name = key_str[1:]
+        key_semi = KEY_SEMITONE.get(key_name, 0)
+        if key_name.upper() not in KEY_SEMITONE and key_name not in KEY_SEMITONE:
+            print(f"  (警告: 曲目 {name} 的 key='{key_str}' 无法识别, 按 C 处理)", flush=True)
         notes_text = cp.get(sec, 'notes', fallback='')
         notes = parse_notes(notes_text)
         if notes:
-            songs.append((name, octave, notes))
+            notes_lines = split_notes_lines(notes_text, notes)
+            songs.append((name, octave, key_semi, key_octave_shift, notes, notes_lines))
     return songs
 
 
@@ -506,45 +572,51 @@ def play_note_env(voice, freq, dur):
         time.sleep(TICK)
 
 
-def play_song(psg, voice, name, base_octave, notes, selector, tempo):
+def play_song(psg, voice, name, base_octave, key_semi, key_octave_shift, notes, notes_lines, selector, tempo):
     """播放一首歌. 若中途 selector 被切换则立即返回 (打断).
     切歌打断时复位硬件 + 音量清零.
-    每个音前检查 tempo 变化, 同步给 voice (包络 D/R 缩放)."""
+    key_semi: 调号半音偏移 (移调), key_octave_shift: 整曲八度偏移 (+1/-1/0).
+    notes_lines: 按 ini 原始行分组的音符, 用于播放时按行打印乐谱."""
     beat_t = tempo.get()
-    print(f"\n♪ {name} ♪  (beat_t={beat_t:.3f}s)", flush=True)
-    for item in notes:
-        # 键盘切换检查 (每个音前)
+    oct_marker = ('^' if key_octave_shift > 0 else ',' if key_octave_shift < 0 else '')
+    print(f"\n♪ {name} ♪  (beat_t={beat_t:.3f}s, key={oct_marker}{_key_semi_to_name(key_semi)})", flush=True)
+
+    def check_interrupt():
+        """检查切歌/调速/颤音变化. 返回 True=被切歌打断."""
         if selector.consume_change():
             selector.clear_change()
             voice.silence()
-            psg.volume(0)   # 切歌音量清零 (配合 RST)
-            psg.reset()     # 切歌复位: 清计数器/toggle
-            return False    # 被打断
-        # 速度变化检查 → 同步包络
+            psg.volume(0); psg.reset()
+            return True
         if tempo.consume_change():
             tempo.clear_change()
             beat_t = tempo.get()
             voice.set_tempo(beat_t)
             print(f"\n   [速度更新] beat_t={beat_t:.3f}s", flush=True)
-        # 颤音开关/频率/幅度/延迟变化检查 → 同步 voice
         if tempo.vib_changed.is_set():
             tempo.vib_changed.clear()
             voice.set_vibrato(tempo.vib_enabled, tempo.vib_rate, tempo.vib_amp_frac, tempo.vib_delay)
-        if len(item) == 3:
-            degree, beats, oct_override = item
-            oct_use = oct_override[0]
-        else:
-            degree, beats = item
-            oct_use = base_octave
-        dur = beats * beat_t
-        if degree == 0:
-            voice.silence()
-            n = int(dur / TICK)
-            for _ in range(n):
-                time.sleep(TICK)
-        else:
-            f = jianpu_freq(degree, oct_use)
-            play_note_env(voice, f, dur)
+        return False
+
+    # 按 ini 原始行打印乐谱, 播到哪个音就打印该音的 token
+    for line in notes_lines:
+        if check_interrupt(): return False
+        print("  播放| ", end='', flush=True)
+        for item in line:
+            if check_interrupt(): return False
+            degree, beats, oct_override, accidental, raw_tok = item
+            oct_use = (oct_override[0] if oct_override is not None else base_octave) + key_octave_shift
+            dur = beats * beat_t
+            # 打印当前音的 token (高亮: 用方括号包住)
+            print(f"[{raw_tok}]", end=' ', flush=True)
+            if degree == 0:
+                voice.silence()
+                for _ in range(int(dur / TICK)):
+                    time.sleep(TICK)
+            else:
+                f = jianpu_freq(degree, oct_use, key_semi, accidental)
+                play_note_env(voice, f, dur)
+        print()   # 行末换行
     time.sleep(0.3)
     return True   # 正常播完
 
@@ -595,14 +667,14 @@ def main():
     try:
         while not selector._stop:
             idx = selector.get()
-            name, oct, notes = songs[idx]
+            name, oct, key_semi, key_octave_shift, notes, notes_lines = songs[idx]
             psg.reset()        # 每首歌开始前复位
             voice.silence()
             psg.volume(0)      # 音量清零
             print(f"\n########## 曲目 {idx+1}/{len(songs)} ##########", flush=True)
             selector.clear_change()
             tempo.clear_change()
-            finished = play_song(psg, voice, name, oct, notes, selector, tempo)
+            finished = play_song(psg, voice, name, oct, key_semi, key_octave_shift, notes, notes_lines, selector, tempo)
             if not finished:
                 continue   # 被键盘打断, 跳到新曲目
             # 正常播完: 单曲模式回到锁定曲目, 否则自动下一首
