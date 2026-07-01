@@ -1,12 +1,12 @@
 # PSG1 v0.2 交接文档
 
-> 单音 PSG + 4-bit 音量（TLC7524 衰减器）
-> 交接时间：2026-07-01
-> 状态：**设计 + 仿真完成，待硬件实测**
+> 单音 PSG + 4-bit 音量（TLC7524 衰减器）+ ADSR 包络 + 颤音
+> 交接时间：2026-07-02
+> 状态：**硬件实测出声成功，ADSR+颤音合成器完成**
 
 ## 一句话现状
 
-v0.2 在 v0.1（单通道方波）基础上加了 **4-bit 数字音量**（HC374 锁存 + TLC7524 衰减器），去掉了 gate（vol=0 静音替代）。**RTL 仿真全过，硬件链路物理必然可行（TLC7524 分压 → 耦合电容 → 运放），待实际搭电路验证出声。**
+v0.2 在 v0.1（单通道方波）基础上加了 **4-bit 数字音量**（HC374 锁存 + TLC7524 衰减器），去掉了 gate（vol=0 静音替代）。**硬件实测出声成功**：TLC7524 正向接法（REF=方波输入/OUT1=输出/RFB=GND）音量调整生效，上位机 `psg_adsr_songs_v02.py` 实现钢琴风格 ADSR 包络 + period 三角波颤音 + 7 首曲目库（ini 可编辑）。（初版误用反接电压模式致噪音+音量失效，已改正。）
 
 ## 文件位置
 
@@ -21,7 +21,13 @@ psg_voice/PSG1 v0.2/
 ├── tb/
 │   ├── psg_voice_v02_tb.v # 音量/频率/静音验证（全过）
 │   └── psg_v02_debug.v    # tc_hi/reload/toggle 追踪调试
-└── host/                  # 空，待写控制脚本
+├── host/
+│   ├── psg_adsr_songs_v02.py  # ⭐ 最终控制脚本（ADSR+颤音+曲目库+键盘）
+│   ├── psg_songs.ini          # 曲目库（简谱文本格式，用户可编辑增删）
+│   ├── psg_config.ini         # 用户调参成果（速度/颤音，必提交）
+│   └── (psg_env/adsr/ft232h 等为迭代中间产物)
+├── Main_2026-07-01.net    # 实际电路 netlist（权威接线依据）
+└── tlc7524.docx/pdf       # TLC7524 datasheet 留档
 ```
 
 项目级共享：
@@ -49,13 +55,18 @@ psg_voice/PSG1 v0.2/
 ### 音量映射
 `audio_out = toggle_q ? (vol << 4) : 0`（vol 0-15 → 幅度 0-240，对应 0-4.7V）
 
-### 输出链路（电压模式，须运放缓冲）
+### 输出链路（R-2R 正向接法，须运放缓冲）
 ```
-toggle_q(0/5V方波) → TLC7524 Pin1/OUT1(输入) → Pin15/REF(输出=5V×D/256)
-                   → 运放(高阻缓冲, 必需, REF输出阻抗高) → 耦合电容(隔直) → 喇叭
+toggle_q(0/5V方波) → TLC7524 Pin15/REF(参考输入) → R-2R 衰减 → Pin1/OUT1(输出=5V×D/256)
+                   → 耦合电容(隔直) → 运放(缓冲) → 喇叭
 ```
-**运放是必需的**：TLC7524 电压模式下 REF 端输出阻抗高，直推喇叭会被拉低失真。
-TLC7524 引脚（实测，DIP-16）：Pin1=OUT1 / Pin2=OUT2 / Pin3=GND / Pin4-8=DB7-DB3 / Pin9-11=DB2-DB0 / Pin12=CS / Pin13=WR / Pin14=VDD / Pin15=REF / Pin16=RFB。电压模式下 RFB(Pin16) 悬空、OUT2(Pin2) 接地。
+**接法说明**：REF 接方波（低阻参考源），OUT1 取衰减后输出，RFB(Pin16) 接 GND 补全梯形网络。
+OUT1 输出阻抗较高（R-2R 网络），实际推喇叭须加运放缓冲。
+TLC7524 引脚（实测 DIP-16）：Pin1=OUT1 / Pin2=OUT2 / Pin3=GND / Pin4-8=DB7-DB3 / Pin9-11=DB2-DB0 / Pin12=CS / Pin13=WR / Pin14=VDD / Pin15=REF / Pin16=RFB。
+
+> ⚠️ **历史教训**：初版误用"反接电压模式"（OUT1=输入/REF=输出/RFB 悬空），实测噪音叠加方波 + 音量失效。
+> 根因（datasheet SLAS061D）：①电压模式只保证 OUT1≤2.5V 线性，0/5V 方波超范围；②OUT1/REF 寄生电容随数字码跳变（30↔120pF）致振铃噪音；③RFB 悬空致梯形电流无处泄放。
+> 改成正向接法（REF=输入/OUT1=输出/RFB=GND）后音量逻辑恢复。
 
 ## 仿真验证结果（全过 ✅）
 
@@ -79,31 +90,33 @@ iverilog -g2012 -o tb/psg_voice_v02_tb.vvp ^
 vvp tb/psg_voice_v02_tb.vvp
 ```
 
-## 待办（按优先级）
+## 已完成
 
-### 1. 写 FT232H 控制脚本（host/psg_ft232h_v02.py）⭐
-基于 v0.1 的 `psg_voice/PSG1 v0.1/host/psg_ft232h.py` 改：
-- D5 从 gate 改成 A0（写音量选通）
-- 新增 `set_volume(0-15)` 方法（D0-D3=vol，A0 上升沿）
-- 去掉 `set_gate()`（vol=0 即静音）
-- 注意：写 period 和写音量共用 D0-D7，要小心别互相干扰（写 period 后 D 口残留值，写音量前要重设 D0-D3）
+- ✅ **硬件实测出声**：TLC7524 正向接法（REF=方波输入/OUT1=输出/RFB=GND）音量调整生效
+- ✅ **FT232H 控制脚本** `host/psg_adsr_songs_v02.py`：
+  - 钢琴风格 ADSR 包络（A快/D明显/S低/R快），D/R 随速度缩放
+  - 颤音（period 三角波偏移，≤半半音；延迟/频率/幅度均可键盘调）
+  - 曲目库外置 `psg_songs.ini`（简谱文本格式，用户可编辑增删）
+  - 键盘控制（独立线程中断响应）：n/b 切歌，./, 速度，v 颤音开关，;/' 颤音频率，[/] 颤音幅度，-/= 颤音延迟，q 退出
+  - `--song N` 命令行单曲循环
+  - 所有参数持久化到 `psg_config.ini`
+  - 切歌时 RST 复位 + 音量清零
+- ✅ 总线 bug 修复：写 period/音量前先关掉对方选通信号（freq 先 A0=0，volume 先 LE=0），防串扰
+- ✅ TLC7524 引脚定义修正（据 datasheet + 实测 net）
+- ✅ 音量接线论证（DB4-7 高 4 位最优）
 
-```python
-# 关键改动示意
-def set_volume(self, vol):  # vol: 0-15
-    self._c = vol & 0x0F        # C口低4位=vol, 高4位=0
-    self.dev.write(bytes([0x82, self._c, 0xFF])); time.sleep(2e-3)
-    self._sd(BIT_A0, 1); self._sd(BIT_A0, 0)  # A0(D5) 上升沿锁存
-```
+## 待办
 
-### 2. 硬件实测
-- 按 wiring-table.md 搭电路（在 v0.1 基础上加 HC374 + TLC7524，拆 HC00 的 gate）
-- 跑音量渐变测试（vol 0→15 扫一遍，听音量变化）
-- 验证 vol=0 真静音（注意 TLC7524 的馈通泄漏，可能不是完全无声）
+### 1. 曲目准确性
+- 新加的 3 首（友谊地久天长/铃儿响叮当/粉刷匠）简谱需用户实测校对，不准的在 `psg_songs.ini` 直接改
+- 可继续补充曲目（编辑 ini 即可，无需改代码）
 
-### 3. 文档补充
-- wiring-table.md 补完整输出链路（TLC7524 REF → 电容 → 运放 → 喇叭），现在只写到 REF→喇叭
-- 实测后更新 development-log（如 v0.1 那样记录硬件调试）
+### 2. 文档补充
+- wiring-table.md 的 U7 输出链路：当前 RFB 接 GND 是简化验证，datasheet Figure 3 标准做法是 RFB 接运放输出（I-V 闭环）。实测若 OUT1 带载不足再加运放。
+- 实测后更新 development-log（如 v0.1 那样记录硬件调试过程）
+
+### 3. RTL 同步
+- `rtl/psg_voice_v02.v` 的 TLC7524 行为模型注释已改（正向接法），但物理引脚映射以 net 文件为准。如需 RTL 完整反映新接法可进一步细化。
 
 ## 关键经验（从 v0.1 带过来的硬件教训）
 

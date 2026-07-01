@@ -1,0 +1,1 @@
+cd /d E:\working\vscode-projects\74HC-Chiptune\psg_voice\PSG1 v0.2\host && python psg_adsr_songs_v02.py --song 5
