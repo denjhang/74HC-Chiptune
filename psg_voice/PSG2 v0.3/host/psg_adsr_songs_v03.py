@@ -57,16 +57,22 @@ class Psg:
         self.dev = ftd2xx.open(0)
         self.dev.resetDevice()
         self.dev.setBitMode(0x00, 0x02)
-        time.sleep(0.05)
+        # setBitMode 切换瞬间 D 口引脚状态不定, A0/LE 毛刺会触发 HC374/HC373 锁存随机数据.
+        # 立即把 D 口全拉低 (A0=LE=RST=0), RST=0 期间计数器/触发器被按住, 避免毛刺噪音.
+        # ⚠️ HC374 无 MR 脚不吃 RST, 但 A0=0 期间它不会锁存 (CP 无上升沿).
+        self._d = 0xFF   # 先设全 1 (RST 高 = 不复位期), 方向已确定
+        self.dev.write(bytes([0x80, self._d, 0xFF]))   # D 口方向全输出
+        # 立刻拉低 A0/LE/RST, 杜绝毛刺上升沿
         self._d = 0; self._c = 0
+        self.dev.write(bytes([0x80, self._d, 0xFF]))   # D 口全 0 (A0=LE=RST=0)
+        time.sleep(0.05)
         self._vol = 0
         # v0.3 方波音色状态 (会被 ToneControl 实时改)
         # ⚠️ bit 位据硬件实测 (2026-07-03): bit6=REF, bit7=mode (与接线表文档相反, 以硬件为准)
         self.duty = 0b11   # 默认 50% (无补偿, 最干净音色)
         self.mode = 0      # bit7 mode (0=方波, 1=白噪)
         self.ref  = 0      # bit6 REF  (0=占空比变体, 1=Q0)
-        self._wb()
-        self.reset()
+        self.reset()       # RST 脉冲 (复位 HC161, 此时 A0/LE=0 不会误锁存)
         self.init_audio()  # 启动: 置干净状态 (50%方波 + 频率最高听不见)
 
     def init_audio(self):
@@ -134,7 +140,12 @@ class Psg:
     def close(self):
         try:
             self.shutdown()         # 退出: 干净状态 (50%方波/音量0/频率最高)
-            self._d = 0; self._c = 0; self._wb()
+            # RST 持续拉低 (D口只清 A0/LE, 保留 RST=0 按住计数器),
+            # 这样 dev.close() 引脚跳变时 HC161 被复位, 不会冒音.
+            self._d = 0   # A0=LE=RST=0 全低
+            self._c = 0
+            self._wb()
+            time.sleep(0.02)   # 等 RST 生效稳定
         except: pass
         self.dev.close()
 
