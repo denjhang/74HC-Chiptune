@@ -535,7 +535,7 @@ class ToneControl:
     状态直接写入 Psg 实例的 duty/mode/ref 字段, 由下一次 write_ctrl 带到硬件."""
     def __init__(self, psg):
         self.psg = psg
-        self.duty_idx = 0   # DUTY_LIST 索引
+        self.duty_idx = 3   # DUTY_LIST 索引, 默认 50% (与 Psg.init_audio 一致)
         self.lock = threading.Lock()
         self.changed = threading.Event()
         self._apply()       # 初始化硬件音色位
