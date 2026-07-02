@@ -62,11 +62,26 @@ class Psg:
         self._vol = 0
         # v0.3 方波音色状态 (会被 ToneControl 实时改)
         # ⚠️ bit 位据硬件实测 (2026-07-03): bit6=REF, bit7=mode (与接线表文档相反, 以硬件为准)
-        self.duty = 0      # bit4-5 占空比挡索引值 (0..3)
+        self.duty = 0b11   # 默认 50% (无补偿, 最干净音色)
         self.mode = 0      # bit7 mode (0=方波, 1=白噪)
         self.ref  = 0      # bit6 REF  (0=占空比变体, 1=Q0)
         self._wb()
         self.reset()
+        self.init_audio()  # 启动: 置干净状态 (50%方波 + 频率最高听不见)
+
+    def init_audio(self):
+        """启动初始化: duty=50% / 方波模式 / ref=占空比变体 / 频率最高 (听不见).
+        防止上电瞬间残留噪音. period=1 → freq=32kHz 超出可听范围."""
+        self.duty = 0b11; self.mode = 0; self.ref = 0
+        self.set_period(1)          # period=1 → 频率最高 (32kHz, 听不见)
+        self.write_ctrl(0)          # 音量归零
+
+    def shutdown(self):
+        """退出清理: duty=50% / 方波模式 / 音量归零 / 频率最高 (听不见).
+        防止退出后残留噪音 (尤其白噪模式)."""
+        self.duty = 0b11; self.mode = 0; self.ref = 0
+        self.set_period(1)
+        self.write_ctrl(0)
 
     def _wb(self):
         self.dev.write(bytes([0x80, self._d & 0xFF, 0xFF]))
@@ -118,7 +133,7 @@ class Psg:
 
     def close(self):
         try:
-            self.write_ctrl(0)
+            self.shutdown()         # 退出: 干净状态 (50%方波/音量0/频率最高)
             self._d = 0; self._c = 0; self._wb()
         except: pass
         self.dev.close()
