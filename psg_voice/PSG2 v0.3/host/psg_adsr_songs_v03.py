@@ -823,9 +823,10 @@ def main():
     except KeyboardInterrupt:
         print("\n停止")
     finally:
-        selector.stop()
-        voice.silence()
-        psg._sd(BIT_RST, 0)
+        selector.stop()         # 先停键盘线程 (避免和退出写入竞争)
+        time.sleep(0.05)        # 等键盘线程退出
+        psg.shutdown()          # 强制干净状态: 50%方波/mode=0/vol=0/最高频 (防残留白噪)
+        psg._sd(BIT_RST, 0)     # RST 拉低 (持续复位=静音)
         psg.close()
         print("已静音, 设备关闭")
 
