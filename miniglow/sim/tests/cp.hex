@@ -1,0 +1,15 @@
+# cp.hex - 对应 miniglow_tb_cp.v（SEG=4 段，新协处理器段）
+# CP 握手：写 REG_DATA=0x55, START, 读 OUT_L=0xAA → A=0xAA
+# 然后 IO_OUT=0x99
+# 验证：miniglow_sim cp.hex 12 -check AA 99
+@0 0C04
+@1 0202
+@2 0300
+@3 0855
+@4 0203
+@5 0801
+@6 0205
+@7 31FF
+@8 0C00
+@9 0A99
+@10 FFFF

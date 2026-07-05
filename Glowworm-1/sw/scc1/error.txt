@@ -1,0 +1,5 @@
+main.c:18: warning: shifting an `unsigned char' by 8 bits is undefined
+main.c:22: �������.
+寄存器堆占用: 64字节;
+RAM占用: 16字节;
+ROM占用: 4978字节;

@@ -1,0 +1,8 @@
+main.c:18: warning: shifting an `unsigned char' by 8 bits is undefined
+main.c:22: ±àÒë½áÊø.
+glowcc: done. ROM=4978 bytes, RAM=16 bytes, RF=64 bytes
+main.c:18: warning: shifting an `unsigned char' by 8 bits is undefined
+main.c:22: ±àÒë½áÊø.
+å¯„å­˜å™¨å †å ç”¨: 64å­—èŠ‚;
+RAMå ç”¨: 16å­—èŠ‚;
+ROMå ç”¨: 4978å­—èŠ‚;

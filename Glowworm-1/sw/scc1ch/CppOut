@@ -1,0 +1,58 @@
+#line 1 "main_unrolled.c.bak"
+
+
+
+
+
+
+#line 1 "../scc_stc/glow_types.h"
+
+
+
+
+
+
+
+
+
+typedef unsigned char      u8;
+typedef unsigned short     u16;
+typedef unsigned int       u32;
+typedef signed char        s8;
+typedef signed short       s16;
+typedef signed int         s32;
+
+
+#line 8 "main_unrolled.c.bak"
+
+extern u8 REGISTER_IO0;
+
+
+static u32 cnt = 0;
+static u32 step_val;
+static u8  vol;
+static u8  wav[32];
+
+
+#line 34 "main_unrolled.c.bak"
+
+void main() {
+    u8 i;
+
+    for (i = 0; i < 32; i++) wav[i] = i * 8;
+    step_val = 0x00100000u;
+    vol = 12;
+
+ REGISTER_IO0 = 0xAA;
+ do { s16 mix = 0; cnt += step_val; { u8 _offs = (u8)(cnt >> 16) & 0x1F; u8 _b = wav[_offs]; s16 _tmp; if (_b >= 128) _tmp = -(s16)(((u16)(256 - _b) * vol) >> 4); else _tmp = (s16)(((u16)_b * vol) >> 4); mix += _tmp; } if (mix > 127) mix = 127; if (mix < -128) mix = -128;REGISTER_IO0 = (u8)(128 + mix); } while(0);
+ REGISTER_IO0 = 0xBB;
+ do { s16 mix = 0; cnt += step_val; { u8 _offs = (u8)(cnt >> 16) & 0x1F; u8 _b = wav[_offs]; s16 _tmp; if (_b >= 128) _tmp = -(s16)(((u16)(256 - _b) * vol) >> 4); else _tmp = (s16)(((u16)_b * vol) >> 4); mix += _tmp; } if (mix > 127) mix = 127; if (mix < -128) mix = -128;REGISTER_IO0 = (u8)(128 + mix); } while(0);
+ REGISTER_IO0 = 0xCC;
+ do { s16 mix = 0; cnt += step_val; { u8 _offs = (u8)(cnt >> 16) & 0x1F; u8 _b = wav[_offs]; s16 _tmp; if (_b >= 128) _tmp = -(s16)(((u16)(256 - _b) * vol) >> 4); else _tmp = (s16)(((u16)_b * vol) >> 4); mix += _tmp; } if (mix > 127) mix = 127; if (mix < -128) mix = -128;REGISTER_IO0 = (u8)(128 + mix); } while(0);
+ REGISTER_IO0 = 0xDD;
+ do { s16 mix = 0; cnt += step_val; { u8 _offs = (u8)(cnt >> 16) & 0x1F; u8 _b = wav[_offs]; s16 _tmp; if (_b >= 128) _tmp = -(s16)(((u16)(256 - _b) * vol) >> 4); else _tmp = (s16)(((u16)_b * vol) >> 4); mix += _tmp; } if (mix > 127) mix = 127; if (mix < -128) mix = -128;REGISTER_IO0 = (u8)(128 + mix); } while(0);
+ REGISTER_IO0 = 0xEE;
+ do { s16 mix = 0; cnt += step_val; { u8 _offs = (u8)(cnt >> 16) & 0x1F; u8 _b = wav[_offs]; s16 _tmp; if (_b >= 128) _tmp = -(s16)(((u16)(256 - _b) * vol) >> 4); else _tmp = (s16)(((u16)_b * vol) >> 4); mix += _tmp; } if (mix > 127) mix = 127; if (mix < -128) mix = -128;REGISTER_IO0 = (u8)(128 + mix); } while(0);
+ REGISTER_IO0 = 0x55;
+    while (1);
+}

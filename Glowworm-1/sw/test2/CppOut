@@ -1,0 +1,9 @@
+#line 1 "main.c"
+
+extern unsigned char REGISTER_IO0;
+
+
+void main() {
+ REGISTER_IO0 = 0x55;
+    while (1);
+}

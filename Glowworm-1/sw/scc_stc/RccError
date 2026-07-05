@@ -1,0 +1,13 @@
+scc.c:74: ±àÒë½áÊø.
+glowcc: done. ROM=11864 bytes, RAM=252 bytes, RF=69 bytes
+main.c:44: illegal statement termination
+main.c:44: skipping `volatile'
+main.c:44: illegal use of type name `u32'
+main.c:44: warning: expression with no effect elided
+main.c:44: syntax error; found `check' expecting `;'
+main.c:44: undeclared identifier `check'
+main.c:53: ±àÒë½áÊø.
+scc.c:74: ±àÒë½áÊø.
+å¯„å­˜å™¨å †å ç”¨: 69å­—èŠ‚;
+RAMå ç”¨: 252å­—èŠ‚;
+ROMå ç”¨: 11864å­—èŠ‚;

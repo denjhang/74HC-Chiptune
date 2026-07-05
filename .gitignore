@@ -1,6 +1,11 @@
 # Build artifacts
 *.vvp
 *.vcd
+*.exe
+*.o
+*.obj
+*.LST
+*.OBJ
 
 # FT232H driver installer (large, redownloadable)
 **/CDM2123620_Setup.zip

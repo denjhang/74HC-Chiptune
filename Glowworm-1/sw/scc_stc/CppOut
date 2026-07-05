@@ -1,0 +1,79 @@
+#line 1 "scc.c"
+
+
+
+
+
+
+
+#line 1 "glow_types.h"
+
+
+
+
+
+
+
+
+
+typedef unsigned char      u8;
+typedef unsigned short     u16;
+typedef unsigned int       u32;
+typedef signed char        s8;
+typedef signed short       s16;
+typedef signed int         s32;
+
+
+#line 9 "scc.c"
+
+
+
+
+static u32 scc_cnt[5];
+static u32 scc_step_val[5];
+static u8  scc_vol[5];
+static u8  scc_key[5];
+static u16 scc_freq[5];
+static u8  scc_wav[5][32];
+
+
+
+void scc_set_step(u8 ch, u32 step) {
+    if (ch < 5) scc_step_val[ch] = step;
+}
+
+void scc_set_vol(u8 ch, u8 vol) {
+    if (ch < 5) scc_vol[ch] = vol & 0x0F;
+}
+
+void scc_set_key(u8 mask) {
+    u8 ch;
+    for (ch = 0; ch < 5; ch++)
+        scc_key[ch] = (mask >> ch) & 1;
+}
+
+void scc_set_wave(u8 ch, u8 idx, u8 dat) {
+    if (ch < 5 && idx < 32)
+        scc_wav[ch][idx] = dat;
+}
+
+
+
+
+
+#line 60 "scc.c"
+
+
+
+
+u8 scc_render(void) {
+    s16 mix = 0;
+ do { if (scc_step_val[0] > 0) { scc_cnt[0] += scc_step_val[0]; if (scc_key[0]) { u8 _offs = (u8)(scc_cnt[0] >> 16) & 0x1F; u8 _vol = scc_vol[0]; u8 _b = scc_wav[0][_offs]; s16 _tmp; if (_b >= 128) _tmp = -(s16)(((u16)(256 - _b) * _vol) >> 4); else _tmp = (s16)(((u16)_b * _vol) >> 4);mix += _tmp; } } } while(0);
+ do { if (scc_step_val[1] > 0) { scc_cnt[1] += scc_step_val[1]; if (scc_key[1]) { u8 _offs = (u8)(scc_cnt[1] >> 16) & 0x1F; u8 _vol = scc_vol[1]; u8 _b = scc_wav[1][_offs]; s16 _tmp; if (_b >= 128) _tmp = -(s16)(((u16)(256 - _b) * _vol) >> 4); else _tmp = (s16)(((u16)_b * _vol) >> 4);mix += _tmp; } } } while(0);
+ do { if (scc_step_val[2] > 0) { scc_cnt[2] += scc_step_val[2]; if (scc_key[2]) { u8 _offs = (u8)(scc_cnt[2] >> 16) & 0x1F; u8 _vol = scc_vol[2]; u8 _b = scc_wav[2][_offs]; s16 _tmp; if (_b >= 128) _tmp = -(s16)(((u16)(256 - _b) * _vol) >> 4); else _tmp = (s16)(((u16)_b * _vol) >> 4);mix += _tmp; } } } while(0);
+ do { if (scc_step_val[3] > 0) { scc_cnt[3] += scc_step_val[3]; if (scc_key[3]) { u8 _offs = (u8)(scc_cnt[3] >> 16) & 0x1F; u8 _vol = scc_vol[3]; u8 _b = scc_wav[3][_offs]; s16 _tmp; if (_b >= 128) _tmp = -(s16)(((u16)(256 - _b) * _vol) >> 4); else _tmp = (s16)(((u16)_b * _vol) >> 4);mix += _tmp; } } } while(0);
+ do { if (scc_step_val[4] > 0) { scc_cnt[4] += scc_step_val[4]; if (scc_key[4]) { u8 _offs = (u8)(scc_cnt[4] >> 16) & 0x1F; u8 _vol = scc_vol[4]; u8 _b = scc_wav[4][_offs]; s16 _tmp; if (_b >= 128) _tmp = -(s16)(((u16)(256 - _b) * _vol) >> 4); else _tmp = (s16)(((u16)_b * _vol) >> 4);mix += _tmp; } } } while(0);
+    if (mix > 127)  mix = 127;
+    if (mix < -128) mix = -128;
+    return (u8)(128 + mix);
+}

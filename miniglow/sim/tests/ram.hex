@@ -1,0 +1,10 @@
+# ram.hex - 对应 miniglow_tb_ram.v
+# SRAM[0x10000]=0x55, A=0x55, IO_OUT=0x55
+# 验证：miniglow_sim ram.hex 10 -check 55 55
+@0 0C01
+@1 0200
+@2 0300
+@3 0855
+@4 31FF
+@5 3AFF
+@6 FFFF
