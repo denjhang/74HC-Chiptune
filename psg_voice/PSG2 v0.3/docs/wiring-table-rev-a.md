@@ -283,7 +283,7 @@ Pin 10: GND  Pin 20: VCC
 | 8 (Y3) | NOT(RC) | → U4.12 (门4 输入 b) | |
 | 12 (A4) | ← U4.6 (NOT feedback) | 门4 输入 a | |
 | 13 (B4) | ← U4.8 (NOT RC) | 门4 输入 b | |
-| 11 (Y4) | **feedback OR RC (启动后反馈)** | → **U13.D0 (HC374 Pin 9)** | ⭐ 启动覆盖输出 |
+| 11 (Y4) | **feedback OR RC (启动后反馈)** | → **U13.D0 (HC374 Pin 3)** | ⭐ 启动覆盖输出 |
 | 14 | VCC | +5V | |
 | 7 | GND | GND | |
 
