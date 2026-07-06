@@ -14,9 +14,9 @@
 //   hc374  x1 — 8 bit 控制寄存器
 //   TLC7524   — 1-bit DAC (REF=噪音 Q7, DB4-7=音量)
 //
-// 死锁防护 (0 额外芯片): RST 期间 serial_in=1 持续灌种子。
-//   硬件借方波通道 HC00 剩余门把 rst_n 反相, RST 时强制 serial_in=1。
-//   白噪 max-length 性质: 种子非0 永不归零 (全1是过渡态, 非死锁)。
+// 死锁防护 (0 额外芯片): HC164 MR 常接 +5V (不主动清零), 靠上电随机值 + max-length 自持.
+//   HC164 上电状态随机 (大概率非 0), max-length LFSR 性质保证非 0 永不归零.
+//   serial_in 直接接 xor_fb, 无需 RST 灌种逻辑 (原方案借 HC00 反相, 现删).
 //
 // 寄存器 (HC374, 8 bit):
 //   bit0-3: 音量 (16 级, Q0-Q3 → DB4-7, 与方波风格统一)
@@ -68,13 +68,13 @@ module psg_noise_v03 (
         ._2Y()
     );
 
-    // ========== 绑定开关 2 选 1 (借 HC00 剩余门, 0 额外芯片) ==========
+    // ========== 绑定开关 2 选 1 (HC153 下半部, 0 额外芯片) ==========
+    // HC153 下半部 (2Y) 平时关闭 (2G_n=1), 改用:
+    //   bind_sw=0: 2G_n 仍 =1, noise_clk = ind_clk (走 1Y 上半部)
+    //   bind_sw=1: 切到 square_tc
+    // 实现见 HC153 下半部接线 (wiring-table U15 改动), RTL 行为级用 mux 等效.
     // bind_sw=0: noise_clk = ind_clk (独立模式, HC161 分频)
     // bind_sw=1: noise_clk = square_tc (绑定模式, 噪音=2×方波频率, 音越高越密)
-    // 硬件: HC00 4 门 (2 与非 + 1 反相 + 1 汇总):
-    //   n1 = NAND(ind_clk, !bind_sw)
-    //   n2 = NAND(square_tc, bind_sw)   (!bind_sw 用第3门当反相器)
-    //   noise_clk = NAND(n1, n2)
     wire noise_clk = bind_sw ? square_tc : ind_clk;
 
     // ========== LFSR 反馈 (CD4070: max-length Q7⊕Q5⊕Q4⊕Q3, 周期255) ==========
@@ -89,8 +89,11 @@ module psg_noise_v03 (
         .A4(1'b0),    .B4(1'b0),    .Y4()          // 门4: 闲置
     );
 
-    // ========== 死锁防护: RST 期间灌种子 (借 HC00 剩余门反相 RST) ==========
-    wire serial_in = (!rst_n) ? 1'b1 : xor_fb;
+    // ========== 死锁防护: 不灌种, 靠上电随机值 + max-length 自持 ==========
+    // max-length LFSR 性质: 非 0 种子永不归零. HC164 上电状态随机 (大概率非 0),
+    // 跑起来就不死锁. HC164 MR 常接 +5V (不主动清零, 避免 RST 后全 0 死锁).
+    // serial_in 直接接反馈, 无需额外门电路.
+    wire serial_in = xor_fb;
 
     // ========== LFSR 主体 (HC164) ==========
     hc164 u_lfsr (
