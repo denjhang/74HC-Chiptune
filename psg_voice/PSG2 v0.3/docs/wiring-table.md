@@ -503,9 +503,9 @@ noise_clk = NAND( NAND(ind_clk, ~bind), NAND(square_tc, bind) )
 | 6 (A2) | ← U13.Q4 | 门2 输入1 |
 | 5 (B2) | ← U13.Q3 | 门2 输入2 |
 | 4 (Y2) | xor_b（Q4⊕Q3）| → U12.B3 |
-| 9 (A3) | ← U12.Y1（xor_a）| 门3 输入1 |
-| 10 (B3) | ← U12.Y2（xor_b）| 门3 输入2 |
-| 8 (Y3) | xor_fb（反馈 = Q7⊕Q5⊕Q4⊕Q3）| → **U13.HC164.DSA（Pin1，serial_in 直连，无灌种逻辑）** |
+| 8 (A3) | ← U12.Y1（xor_a）| 门3 输入1（门3: A=Pin8, B=Pin9, Y=Pin10，据 TI datasheet 核对 2026-07-03）|
+| 9 (B3) | ← U12.Y2（xor_b）| 门3 输入2 |
+| 10 (Y3) | xor_fb（反馈 = Q7⊕Q5⊕Q4⊕Q3）| → **U13.HC164.DSA（Pin1，serial_in 直连，无灌种逻辑）** |
 | 12 (A4), 13 (B4) | → GND | 门4 闲置 |
 | 11 (Y4) | — | 悬空 |
 | 14 | VDD | +5V |
