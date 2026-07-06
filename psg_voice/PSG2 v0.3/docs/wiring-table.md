@@ -505,7 +505,7 @@ noise_clk = NAND( NAND(ind_clk, ~bind), NAND(square_tc, bind) )
 | 4 (Y2) | xor_b（Q4⊕Q3）| → U12.B3 |
 | 9 (A3) | ← U12.Y1（xor_a）| 门3 输入1 |
 | 10 (B3) | ← U12.Y2（xor_b）| 门3 输入2 |
-| 8 (Y3) | xor_fb（反馈 = Q7⊕Q5⊕Q4⊕Q3）| → U4 门（serial_in 逻辑）|
+| 8 (Y3) | xor_fb（反馈 = Q7⊕Q5⊕Q4⊕Q3）| → **U13.HC164.DSA（Pin1，serial_in 直连，无灌种逻辑）** |
 | 12 (A4), 13 (B4) | → GND | 门4 闲置 |
 | 11 (Y4) | — | 悬空 |
 | 14 | VDD | +5V |
