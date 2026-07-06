@@ -3,22 +3,20 @@
 // 74HC374 — 20-pin DIP 封装
 // 8 路 positive-edge-triggered D 触发器, 共享 CP 和 /OE
 //
-// 引脚映射 (DIP-20) — Nexperia 74HC_HCT374 datasheet (核对 2026-07-07):
-//   Pin  1: /OE  (输出使能, 低有效)
-//   Pin  2: Q0   Pin 20: VDD
-//   Pin  3: D0   Pin 19: D7
-//   Pin  4: D1   Pin 18: D6
-//   Pin  5: D2   Pin 17: D5
-//   Pin  6: D3   Pin 16: D4
-//   Pin  7: Q1   Pin 15: Q7
-//   Pin  8: Q2   Pin 14: Q6
-//   Pin  9: Q3   Pin 13: Q5
-//   Pin 10: GND  Pin 12: Q4
-//   Pin 11: CP (时钟, 上升沿触发)
+// 引脚映射 (DIP-20) — Nexperia 74HC_HCT374 datasheet 5.2 节 (核对 2026-07-07, 读 PDF 原文):
+//   Pin  1: /OE  Pin 11: CP (时钟, 上升沿触发)
+//   Pin  2: Q0   Pin 12: Q4
+//   Pin  3: D0   Pin 13: D4
+//   Pin  4: D1   Pin 14: D5
+//   Pin  5: Q1   Pin 15: Q5
+//   Pin  6: Q2   Pin 16: Q6
+//   Pin  7: D2   Pin 17: D6
+//   Pin  8: D3   Pin 18: D7
+//   Pin  9: Q3   Pin 19: Q7
+//   Pin 10: GND  Pin 20: VCC
 //
-// ⚠️ D 输入和 Q 输出交错排列 (非一边 D 一边 Q).
-//   D 在 Pin 3,4,5,6,16,17,18,19
-//   Q 在 Pin 2,7,8,9,12,13,14,15
+// ⚠️ D 和 Q 交错排列. D 在 Pin 3,4,7,8,13,14,17,18; Q 在 Pin 2,5,6,9,12,15,16,19.
+// 注意 74HC574 引脚不同 (D/Q 分边), 别混淆.
 //
 // 功能:
 //   /OE=0: Q 输出有效, posedge CP → Q <= D
