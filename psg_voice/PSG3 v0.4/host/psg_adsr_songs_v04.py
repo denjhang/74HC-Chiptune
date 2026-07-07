@@ -411,28 +411,67 @@ def jianpu_freq(degree, octave, key_semi=0, accidental=0):
 INI_SONGS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'psg_songs.ini')
 
 
-def parse_notes(text, noise_names=None):
-    """解析 notes 文本. 返回元组列表:
-       方波音符: (degree, beats, oct_ov, accidental, raw_tok, None)
-       噪音音符: (None, beats, None, None, raw_tok, ins_name)
-       noise_names: 噪音乐器名集合, 匹配则当噪音音符."""
+def parse_notes(text, noise_names=None, square_names=None):
+    """解析 notes 文本. 返回元组列表 (7 字段):
+       方波音符: (degree, beats, oct_ov, accidental, raw_tok, noise_ins, sq_ins)
+       噪音音符: (None, beats, None, None, raw_tok, ins_name, None)
+       token 格式:
+         音级:拍数              普通方波 (sq_ins=None, 用 default 音色)
+         乐器名:拍数            噪音乐器 (noise_ins=乐器名)
+         乐器名:音级:拍数       方波乐器切换 (sq_ins=乐器名, 切换后保持)
+       noise_names/square_names: 乐器名集合."""
     noise_names = noise_names or set()
+    square_names = square_names or set()
     notes = []
     for tok in text.replace('|', ' ').split():
         if ':' not in tok:
             print(f"  (警告: 无法解析音符 '{tok}', 跳过)", flush=True)
             continue
-        d_str, b_str = tok.split(':', 1)
+        parts = tok.split(':')
+        # 3 段: 方波乐器切换 (乐器名:音级:拍数)
+        if len(parts) == 3:
+            ins_name, d_raw, b_str = parts
+            if ins_name not in square_names:
+                print(f"  (警告: 未知方波乐器 '{tok}', 跳过)", flush=True)
+                continue
+            try:
+                b = float(b_str)
+            except ValueError:
+                print(f"  (警告: 拍数格式错 '{tok}', 跳过)", flush=True)
+                continue
+            # 解析音级 (带 ^/, 八度前缀, +/- 升降)
+            oct_ov = None
+            if d_raw and d_raw[0] == '^':
+                oct_ov = (5,); d_raw = d_raw[1:]
+            elif d_raw and d_raw[0] == ',':
+                oct_ov = (3,); d_raw = d_raw[1:]
+            accidental = 0
+            if d_raw and d_raw[-1] == '+':
+                accidental = 1; d_raw = d_raw[:-1]
+            elif d_raw and d_raw[-1] == '-':
+                accidental = -1; d_raw = d_raw[:-1]
+            try:
+                d = int(d_raw)
+            except ValueError:
+                print(f"  (警告: 音级格式错 '{tok}', 跳过)", flush=True)
+                continue
+            if not (0 <= d <= 7):
+                print(f"  (警告: 音级超范围 '{tok}', 跳过)", flush=True)
+                continue
+            notes.append((d, b, oct_ov, accidental, tok, None, ins_name))
+            continue
+        # 2 段
+        d_str, b_str = parts[0], parts[1]
         try:
             b = float(b_str)
         except ValueError:
             print(f"  (警告: 拍数格式错 '{tok}', 跳过)", flush=True)
             continue
-        # 噪音乐器 token (d_str 是噪音乐器名, 非数字)
+        # 噪音乐器 (d_str 是噪音乐器名)
         if d_str in noise_names:
-            notes.append((None, b, None, None, tok, d_str))
+            notes.append((None, b, None, None, tok, d_str, None))
             continue
-        # 方波音符: 去八度前缀 (^/,) + 升降后缀 (+/-)
+        # 普通方波
         oct_ov = None
         if d_str and d_str[0] == '^':
             oct_ov = (5,); d_str = d_str[1:]
@@ -451,7 +490,7 @@ def parse_notes(text, noise_names=None):
         if not (0 <= d <= 7):
             print(f"  (警告: 音级超范围 '{tok}', 跳过)", flush=True)
             continue
-        notes.append((d, b, oct_ov, accidental, tok, None))
+        notes.append((d, b, oct_ov, accidental, tok, None, None))
     return notes
 
 
@@ -544,13 +583,66 @@ def load_noise_instruments():
     return instruments
 
 
+# ============== 方波乐器 (square instrument) ==============
+# ini [square_N] 块格式:
+#   noise_ins_name = sq50          乐器名 (notes 里 qwave:1:1 / sq50:1:1 用此名切换)
+#   square_mode = square           square(方波) / noise(噪音模式, 走 mode 白噪)
+#   wave = square                  square(纯净方波) / q0(Q0 抽头调制音色)
+#   square_duty = 50               占空比: 50 / 25 / 12.5 / 6.25
+#   octave_shift = -1              八度移调 (-1 降一八度, 0 不变, +1 升一八度)
+#   square_volume = default        default(走 ADSR) / 手动音量序列 (如 15,12,10 同噪音)
+SQUARE_DUTY_MAP = {6.25: 0b10, 12.5: 0b00, 25: 0b01, 50: 0b11}   # duty 值 → bit4-5 编码
+
+
+class SquareInstrument:
+    """一个方波乐器. 定义音色 (mode/wave/duty) + 八度移调 + 音量模式."""
+    def __init__(self, name, mode_bit, ref_bit, duty_bits, octave_shift, volumes):
+        self.name = name
+        self.mode_bit = mode_bit    # bit7: 0=方波, 1=白噪
+        self.ref_bit = ref_bit      # bit6: 0=占空比变体, 1=Q0
+        self.duty_bits = duty_bits  # bit4-5: 占空比挡
+        self.octave_shift = octave_shift
+        self.volumes = volumes      # None=ADRS, 否则=手动音量列表(同噪音)
+
+    @property
+    def is_adsr(self):
+        return self.volumes is None
+
+
+def load_square_instruments():
+    """从 ini 加载所有 [square_N] 块, 返回 {名称: SquareInstrument}."""
+    cp = configparser.ConfigParser()
+    if not cp.read(INI_SONGS, encoding='utf-8'):
+        return {}
+    instruments = {}
+    for sec in cp.sections():
+        if not sec.startswith('square_'):
+            continue
+        name = cp.get(sec, 'noise_ins_name', fallback='').strip()
+        if not name:
+            continue
+        mode_str = cp.get(sec, 'square_mode', fallback='square').strip().lower()
+        mode_bit = 1 if mode_str == 'noise' else 0
+        wave_str = cp.get(sec, 'wave', fallback='square').strip().lower()
+        ref_bit = 1 if wave_str == 'q0' else 0
+        duty_val = cp.getfloat(sec, 'square_duty', fallback=50.0)
+        duty_bits = SQUARE_DUTY_MAP.get(duty_val, 0b11)   # 缺省 50%
+        octave_shift = cp.getint(sec, 'octave_shift', fallback=0)
+        vol_str = cp.get(sec, 'square_volume', fallback='default').strip().lower()
+        volumes = None if vol_str == 'default' else parse_noise_volume(vol_str)
+        instruments[name] = SquareInstrument(name, mode_bit, ref_bit, duty_bits, octave_shift, volumes)
+    return instruments
+
+
 def load_songs():
     cp = configparser.ConfigParser()
     if not cp.read(INI_SONGS, encoding='utf-8'):
         print(f"(错误: 找不到曲目库 {INI_SONGS})")
-        return [], {}
+        return [], {}, {}
     instruments = load_noise_instruments()
+    square_instruments = load_square_instruments()
     noise_names = set(instruments.keys())
+    square_names = set(square_instruments.keys())
     songs = []
     items = []
     for sec in cp.sections():
@@ -575,11 +667,11 @@ def load_songs():
         if key_name.upper() not in KEY_SEMITONE and key_name not in KEY_SEMITONE:
             print(f"  (警告: 曲目 {name} 的 key='{key_str}' 无法识别, 按 C 处理)", flush=True)
         notes_text = cp.get(sec, 'notes', fallback='')
-        notes = parse_notes(notes_text, noise_names)
+        notes = parse_notes(notes_text, noise_names, square_names)
         if notes:
             notes_lines = split_notes_lines(notes_text, notes)
             songs.append((name, octave, key_semi, key_octave_shift, notes, notes_lines))
-    return songs, instruments
+    return songs, instruments, square_instruments
     return songs
 
 
@@ -929,27 +1021,37 @@ class Recorder:
         pass   # dump 期间不需要硬件复位
 
 
-def dump_tracks(notes_lines, instruments, base_octave, key_semi, key_octave_shift,
+def dump_tracks(notes_lines, instruments, square_instruments, base_octave, key_semi, key_octave_shift,
                 beat_t, duty, mode, ref, duty_oct,
                 vib_enabled, vib_rate, vib_amp_frac, vib_delay):
     """双轨并行时间轴. 方波轨和噪音轨各自从 0 累计, 音长统一 = beats × beat_t.
-    方波 release 不计入音长 (在音长内 tick 完). 噪音 step=ins.step, key_off 切断.
-    返回 (events, total_ms). 两轨并行 (方波行/噪音行各从 0 开始)."""
+    方波 release 不计入音长. 噪音 step=ins.step, key_off 切断.
+    方波乐器: sq_ins 切换音色 (mode/ref/duty + octave_shift), volume=default 走 ADSR,
+             手动 volume 走固定包络 (类似噪音). 切换后保持直到下次切换."""
     # === 方波轨 ===
     rec = Recorder()
-    rec.duty = duty; rec.mode = mode; rec.ref = ref
+    rec.duty = duty; rec.mode = mode; rec.ref = ref   # default = ToneControl 当前状态
     voice = Voice(rec)
     voice.duty_oct = duty_oct
     voice.set_tempo(beat_t)
     voice.set_vibrato(vib_enabled, vib_rate, vib_amp_frac, vib_delay)
     TICK_MS = int(TICK * 1000)
     sq_ms = 0
+    cur_sq_ins = None   # 当前方波乐器 (None=default ToneControl)
     for line in notes_lines:
         for item in line:
-            degree, beats, oct_override, accidental, raw_tok, noise_ins = item
+            degree, beats, oct_override, accidental, raw_tok, noise_ins, sq_ins = item
             if noise_ins is not None:
                 continue   # 噪音音符, 方波轨跳过
+            # 方波乐器切换
+            if sq_ins is not None and sq_ins in square_instruments:
+                cur_sq_ins = square_instruments[sq_ins]
+                rec.duty = cur_sq_ins.duty_bits
+                rec.mode = cur_sq_ins.mode_bit
+                rec.ref  = cur_sq_ins.ref_bit
             oct_use = (oct_override[0] if oct_override is not None else base_octave) + key_octave_shift
+            if cur_sq_ins is not None:
+                oct_use += cur_sq_ins.octave_shift
             dur = beats * beat_t
             dur_ms = int(dur * 1000)
             if degree == 0:
@@ -958,7 +1060,22 @@ def dump_tracks(notes_lines, instruments, base_octave, key_semi, key_octave_shif
                 for _ in range(n):
                     rec.advance(TICK_MS); sq_ms += TICK_MS
                     voice.tick()
+            elif cur_sq_ins is not None and not cur_sq_ins.is_adsr:
+                # 手动音量包络 (不走 ADSR): 设频率, 按步铺满音长写 sq_ctrl vol, key_off 切断
+                f = jianpu_freq(degree, oct_use, key_semi, accidental)
+                voice.psg.freq(f)   # 设 period (不经 Voice.key_on, 不触发 ADSR)
+                end_ms = sq_ms + dur_ms
+                n_vols = len(cur_sq_ins.volumes)
+                step_ms = dur_ms // n_vols if n_vols > 0 else dur_ms
+                for vi, vol in enumerate(cur_sq_ins.volumes):
+                    t = sq_ms + vi * step_ms
+                    rec.cur_ms = t
+                    rec.write_ctrl(vol)
+                rec.cur_ms = end_ms
+                rec.write_ctrl(0)   # key_off 切断
+                sq_ms += dur_ms
             else:
+                # ADSR (default 音色 或 乐器 volume=default)
                 f = jianpu_freq(degree, oct_use, key_semi, accidental)
                 voice.key_on(f)
                 n = int(dur / TICK)
@@ -974,7 +1091,7 @@ def dump_tracks(notes_lines, instruments, base_octave, key_semi, key_octave_shif
     last_noise_ctrl = None
     for line in notes_lines:
         for item in line:
-            degree, beats, oct_override, accidental, raw_tok, noise_ins = item
+            degree, beats, oct_override, accidental, raw_tok, noise_ins, sq_ins = item
             if noise_ins is None:
                 continue   # 方波音符, 噪音轨跳过
             ins = instruments.get(noise_ins)
@@ -1002,38 +1119,46 @@ def dump_tracks(notes_lines, instruments, base_octave, key_semi, key_octave_shif
 
 
 def build_print_schedule(notes_lines, beat_t):
-    """生成实时打印时间表. 返回 (sq_print, nz_print, has_noise).
-    sq_print/nz_print = [(time_ms, raw_tok)]. has_noise=True 时两行同时打印."""
-    sq_print = []; nz_print = []; has_noise = False
+    """按 ini 物理行生成打印表. 返回 (print_rows, has_noise).
+    print_rows = [(start_ms, label, text)] 按物理行, label='方波'/'鼓点'.
+    方波行用方波轨累计时间, 噪音行用噪音轨累计时间 (和 dump_tracks 一致).
+    回放时某行 start_ms 到了就打印该行 (原样显示, 边播边打)."""
+    print_rows = []
+    has_noise = False
     sq_ms = 0; nz_ms = 0
     for line in notes_lines:
-        for item in line:
-            degree, beats, oct_override, accidental, raw_tok, noise_ins = item
-            dur_ms = int(beats * beat_t * 1000)
-            if noise_ins is None:
-                sq_print.append((sq_ms, raw_tok))
-                sq_ms += dur_ms
-            else:
-                has_noise = True
-                nz_print.append((nz_ms, raw_tok))
-                nz_ms += dur_ms
-    return sq_print, nz_print, has_noise
+        # 判断该行类型 (有噪音音符 = 鼓点行, 否则方波行)
+        is_noise_line = any(item[5] is not None for item in line)
+        toks = [item[4] for item in line]   # raw_tok 列表
+        text = ' '.join(f'[{t}]' for t in toks)
+        if is_noise_line:
+            has_noise = True
+            start = nz_ms
+            for item in line:
+                nz_ms += int(item[1] * beat_t * 1000)
+            print_rows.append((start, '鼓点', text))
+        else:
+            start = sq_ms
+            for item in line:
+                sq_ms += int(item[1] * beat_t * 1000)
+            print_rows.append((start, '方波', text))
+    return print_rows, has_noise
 
 
-def dump_song(notes_lines, instruments, base_octave, key_semi, key_octave_shift,
+def dump_song(notes_lines, instruments, square_instruments, base_octave, key_semi, key_octave_shift,
               beat_t, tone, tempo):
     """预录制整首 song → (事件流, 打印时间表, 总时长ms).
-    单时间轴: 方波+噪音共享 cur_ms, 音长统一 = beats × beat_t."""
+    双轨并行: 方波+噪音各自从 0 累计, 音长统一 = beats × beat_t."""
     all_events, total_ms = dump_tracks(
-        notes_lines, instruments, base_octave, key_semi, key_octave_shift, beat_t,
+        notes_lines, instruments, square_instruments, base_octave, key_semi, key_octave_shift, beat_t,
         tone.psg.duty, tone.psg.mode, tone.psg.ref,
         voice_duty_oct_ref(),
         tempo.vib_enabled, tempo.vib_rate, tempo.vib_amp_frac, tempo.vib_delay)
     all_events.sort(key=lambda e: e[0])
     all_events.append((total_ms, 'sq_ctrl', 0))
     all_events.append((total_ms, 'noise', 0))
-    sq_print, nz_print, has_noise = build_print_schedule(notes_lines, beat_t)
-    return all_events, (sq_print, nz_print, has_noise), total_ms + 200
+    print_rows, has_noise = build_print_schedule(notes_lines, beat_t)
+    return all_events, (print_rows, has_noise), total_ms + 200
 
 
 # 全局: voice.duty_oct 由 main 注入, dump_song 间接读取 (避免传参过多)
@@ -1062,7 +1187,7 @@ def play_note_env(voice, freq, dur):
 
 
 def play_song(psg, voice, name, base_octave, key_semi, key_octave_shift, notes, notes_lines,
-              instruments, selector, tempo, tone):
+              instruments, square_instruments, selector, tempo, tone):
     """VGM 式播放: 先 dump 成事件流, 再按时间戳回放.
     切歌/退出立即中断; 速度/音色/颤音变化不中断当前曲, 下一曲 dump 时生效."""
     beat_t = tempo.get()
@@ -1076,25 +1201,18 @@ def play_song(psg, voice, name, base_octave, key_semi, key_octave_shift, notes, 
     tone.consume_change(); tone.clear_change()
 
     # === 阶段 1: dump ===
-    events, print_sched, total_ms = dump_song(notes_lines, instruments, base_octave, key_semi, key_octave_shift,
+    events, print_sched, total_ms = dump_song(notes_lines, instruments, square_instruments,
+                                              base_octave, key_semi, key_octave_shift,
                                               beat_t, tone, tempo)
-    sq_print, nz_print, has_noise = print_sched
+    print_rows, has_noise = print_sched
     print(f"   (dump: {len(events)} 事件, 时长 {total_ms/1000:.2f}s)", flush=True)
-    if has_noise:
-        # 两行完整打印 (方波行 + 噪音行)
-        print("  方波| " + ' '.join(f'[{t}]' for _, t in sq_print), flush=True)
-        print("  鼓点| " + ' '.join(f'[{t}]' for _, t in nz_print), flush=True)
-    else:
-        # 无噪音: 实时单行打印 (边播边打)
-        print("  播放| ", end='', flush=True)
 
     # === 阶段 2: 回放 ===
     import time as _time
     start = _time.monotonic()
-    ei = 0; sq_pi = 0
+    ei = 0; pri = 0
     n_events = len(events)
-    n_sq = len(sq_print)
-    live_print = not has_noise   # 无噪音时实时打印方波 token
+    n_rows = len(print_rows)
     while ei < n_events:
         # 切歌/退出中断
         if selector._stop:
@@ -1105,11 +1223,11 @@ def play_song(psg, voice, name, base_octave, key_semi, key_octave_shift, notes, 
             psg.volume(0); psg.noise_silence(); psg.reset()
             return False
         now_ms = (_time.monotonic() - start) * 1000.0
-        # 实时打印 (无噪音模式)
-        if live_print:
-            while sq_pi < n_sq and sq_print[sq_pi][0] <= now_ms:
-                print(f"[{sq_print[sq_pi][1]}]", end=' ', flush=True)
-                sq_pi += 1
+        # 按行打印 (某行起始时间到了 → 整行原样打印)
+        while pri < n_rows and print_rows[pri][0] <= now_ms:
+            _, label, text = print_rows[pri]
+            print(f"  {label}| {text}", flush=True)
+            pri += 1
         # 硬件事件
         t_ms, port, data = events[ei]
         if now_ms < t_ms:
@@ -1122,35 +1240,55 @@ def play_song(psg, voice, name, base_octave, key_semi, key_octave_shift, notes, 
         elif port == 'noise':
             psg._bus_write(0x04, data)
         ei += 1
-    if live_print:
-        print()
     return True
 
 
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='PSG2 v0.3 ADSR 合成器 (方波通道)')
-    parser.add_argument('--song', type=int, default=None,
-                        help='只播放指定曲目 (1-N) 无限循环, 不指定则循环全部')
+    parser.add_argument('--song', type=str, default=None,
+                        help='播放范围: N (单曲) / N-M (循环 N 到 M) / 不指定则全部')
     args = parser.parse_args()
 
-    songs, instruments = load_songs()
+    songs, instruments, square_instruments = load_songs()
     if not songs:
         print("无曲目, 请检查 psg_songs.ini")
         return
     print(f"(已加载 {len(songs)} 首曲目: {', '.join(s[0] for s in songs)})")
     if instruments:
         print(f"(已加载 {len(instruments)} 个噪音乐器: {', '.join(instruments.keys())})")
+    if square_instruments:
+        print(f"(已加载 {len(square_instruments)} 个方波乐器: {', '.join(square_instruments.keys())})")
 
-    single_song = None
-    start_idx = 0
+    # 解析 --song: N (单曲) / N-M (范围循环) / None (全部)
+    song_range = None   # (start_idx, end_idx) 闭区间, None=全部
     if args.song is not None:
-        if not (1 <= args.song <= len(songs)):
-            print(f"错误: --song 范围 1-{len(songs)}, 你给的是 {args.song}")
-            return
-        single_song = args.song - 1
-        start_idx = single_song
-        print(f"(单曲循环模式: 只播 #{args.song} {songs[single_song][0]})")
+        s = args.song.strip()
+        if '-' in s:
+            a, b = s.split('-', 1)
+            try:
+                lo, hi = int(a), int(b)
+            except ValueError:
+                print(f"错误: --song 格式应为 N 或 N-M, 你给的是 '{s}'")
+                return
+            if not (1 <= lo <= hi <= len(songs)):
+                print(f"错误: --song 范围 1-{len(songs)}, 你给的是 {lo}-{hi}")
+                return
+            song_range = (lo - 1, hi - 1)
+            names = ', '.join(songs[i][0] for i in range(lo - 1, hi))
+            print(f"(范围循环模式: 播放 #{lo}-#{hi}: {names})")
+        else:
+            try:
+                n = int(s)
+            except ValueError:
+                print(f"错误: --song 格式应为 N 或 N-M, 你给的是 '{s}'")
+                return
+            if not (1 <= n <= len(songs)):
+                print(f"错误: --song 范围 1-{len(songs)}, 你给的是 {n}")
+                return
+            song_range = (n - 1, n - 1)
+            print(f"(单曲循环模式: 只播 #{n} {songs[n-1][0]})")
+    start_idx = song_range[0] if song_range else 0
 
     psg = Psg()
     voice = Voice(psg)
@@ -1169,8 +1307,11 @@ def main():
     print("=== PSG2 v0.3 ADSR 合成器 (方波通道 CH0) ===")
     print("    键盘: n/b 切歌  ./, 速度  v 颤音开关  ;/' 颤音频率  [/] 颤音幅度  -/= 颤音延迟")
     print("    音色: D=占空比循环  S=方波/白噪  W=REF切换(占空比变体/Q0调制)  q 退出")
-    if single_song is not None:
-        print(f"    单曲循环: #{args.song} (n/b 仍可切到其它曲, 但播完后回到 #{args.song})")
+    if song_range is not None:
+        if song_range[0] == song_range[1]:
+            print(f"    单曲循环: #{song_range[0]+1} (n/b 仍可切到其它曲, 但播完后回到 #{song_range[0]+1})")
+        else:
+            print(f"    范围循环: #{song_range[0]+1}-#{song_range[1]+1} (n/b 仍可切到其它曲, 但播完后回到范围内)")
     else:
         print("    不操作则自动循环全部曲目")
     print(f"    初始 beat_t={tempo.get():.3f}s  颤音:{'开' if tempo.vib_enabled else '关'} {tempo.vib_rate:.1f}Hz 幅度×{tempo.vib_amp_frac:.4f} 延迟{tempo.vib_delay:.2f}s")
@@ -1190,12 +1331,16 @@ def main():
             tempo.clear_change()
             tone.clear_change()
             finished = play_song(psg, voice, name, oct, key_semi, key_octave_shift,
-                                 notes, notes_lines, instruments, selector, tempo, tone)
+                                 notes, notes_lines, instruments, square_instruments, selector, tempo, tone)
             if not finished:
                 continue
-            if single_song is not None:
+            if song_range is not None:
+                lo, hi = song_range
                 with selector.lock:
-                    selector.idx = single_song
+                    if selector.idx < lo or selector.idx >= hi:
+                        selector.idx = lo       # 越出范围 (n/b 手动切走), 播完回范围头
+                    else:
+                        selector.idx = lo if selector.idx + 1 > hi else selector.idx + 1   # 范围内循环
             else:
                 selector.next()
             selector.clear_change()
