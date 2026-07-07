@@ -6,6 +6,11 @@
 *.obj
 *.LST
 *.OBJ
+*.bak
+
+# Python cache
+__pycache__/
+*.pyc
 
 # FT232H driver installer (large, redownloadable)
 **/CDM2123620_Setup.zip
