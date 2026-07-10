@@ -266,22 +266,29 @@ period12 = {reg4[7:4], reg3[7:0]} = 12-bit
 
 ### U24 — CD4029 (4-bit 波形计数器)
 
+> **命名映射** (Q 输出 → 下游统一叫 counter[0-3]):
+>   CD4029 Q1(P6, LSB) → 经 U29 HC273 → counter[0]
+>   CD4029 Q2(P11)     → 经 U29 HC273 → counter[1]
+>   CD4029 Q3(P14)     → 经 U29 HC273 → counter[2]
+>   CD4029 Q4(P2, MSB) → 经 U29 HC273 → counter[3]
+> 下游 U26(HC283)/U27(HC08)/U33(HC04) 用的 counter[0-3] 就是这 4 位.
+
 | Pin | 信号 | 连接 |
 |-----|------|------|
 | 1 (PE) | → GND | 不预置 |
-| 2 (Q4) | → U29.P8 (D3) | Q4=bit3(MSB) → HC273 D3 |
+| 2 (Q4) | → U29.P8 (D3) | **counter[3]** MSB → HC273 D3 |
 | 3 (J4) | → GND | 预置位4(MSB) 不用 |
 | 4 (J1) | → GND | 预置位1(LSB) 不用 |
 | 5 (Cin) | ← **~freq_tc (U23 门1, 与 HC161 的 PE 同一根线)** | freq_tc=H(CI=L) 时走一步 |
-| 6 (Q1) | → U29.P3 (D0) | Q1=bit0(LSB) → HC273 D0 |
+| 6 (Q1) | → U29.P3 (D0) | **counter[0]** LSB → HC273 D0 |
 | 7 (Cout) | → **U23 门2 (反相成 ~CO = at_extreme)** → U25 J/K | 极值信号 (仅三角折返用) |
 | 8 (VSS) | → GND | |
 | 9 (B/D) | → +5V | 二进制 |
 | 10 (U/D) | ← **uni_ud (U32 门3 mux 输出)** | 方向: fold=1三角折返 / fold=0单向(~dir) |
-| 11 (Q2) | → U29.P4 (D1) | Q2=bit1 → HC273 D1 |
+| 11 (Q2) | → U29.P4 (D1) | **counter[1]** → HC273 D1 |
 | 12 (J2) | → GND | 预置位2 不用 |
 | 13 (J3) | → GND | 预置位3 不用 |
-| 14 (Q3) | → U29.P7 (D2) | Q3=bit2 → HC273 D2 |
+| 14 (Q3) | → U29.P7 (D2) | **counter[2]** → HC273 D2 |
 | 15 (CLK) | ← **clk (4MHz)** | 连续时钟 |
 | 16 (VDD) | → +5V | |
 
@@ -464,10 +471,10 @@ CD4029 的 Q 输出在计数瞬间有毛刺 (各位不同步跳变), HC273 在 c
 | 4 (D1) | ← U24.P11 (Q2) | CD4029 Q2 → D1 |
 | 7 (D2) | ← U24.P14 (Q3) | CD4029 Q3 → D2 |
 | 8 (D3) | ← U24.P2 (Q4, MSB) | CD4029 Q4 → D3 |
-| 2 (Q0) | → U33 HC04 门2 (→ U26 B1) + U27 HC08 | 干净波形 bit0 |
-| 5 (Q1) | → U33 HC04 门3 (→ U26 B2) + U27 HC08 | 干净波形 bit1 |
-| 6 (Q2) | → U33 HC04 门4 (→ U26 B3) + U27 HC08 | 干净波形 bit2 |
-| 9 (Q3) | → U33 HC04 门5 (→ U26 B4) + U27 HC08 | 干净波形 bit3 |
+| 2 (Q0) | → U33 HC04 门2 (→ U26 B1) + U27 HC08 | **counter[0]** 干净波形 bit0 |
+| 5 (Q1) | → U33 HC04 门3 (→ U26 B2) + U27 HC08 | **counter[1]** 干净波形 bit1 |
+| 6 (Q2) | → U33 HC04 门4 (→ U26 B3) + U27 HC08 | **counter[2]** 干净波形 bit2 |
+| 9 (Q3) | → U33 HC04 门5 (→ U26 B4) + U27 HC08 | **counter[3]** 干净波形 bit3 |
 
 > ⚠️ 只用 4 位, HC273 高 4 位 (D4-7) 接 GND 不用 (或用 HC174 六 D 触发器替代, 更省).
 > Gigatron 同款解法: 计数器输出过边沿寄存器滤毛刺再进 DAC.
