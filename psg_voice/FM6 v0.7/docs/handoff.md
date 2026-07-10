@@ -2,7 +2,7 @@
 
 > 6 通道 2-op FM 合成器, 查表法, 基于 WSG8 v0.7 TDM 架构
 > 创建时间：2026-07-10
-> 状态：**架构设计完成 (design.md), 待 C 仿真器验证**
+> 状态：**单通道 FM 算法 RTL 验证通过 (fm6_core.v + WAV)**
 
 ## 一句话定位
 
@@ -184,13 +184,15 @@ FM 有两个乘法, 都不需要硬件乘法器:
 - PSG3 v0.5 总线接口: `psg_voice/PSG3 v0.5/docs/wiring-table-bus.md`
 - 库存表: `psg_voice/PSG3 v0.5/docs/inventory.md`
 
-## 待实现 (design.md 已完成, 下一步)
+## 待实现 (单通道 RTL 验证通过, 下一步)
 
 1. [x] design.md (详细架构 + FM TDM 步序列 + conv_vol 地址方案 + ADSR + 6 问题方案)
-2. [ ] **C 仿真器** (fm6_sim.c): 移植 ym_render(), 输出 WAV 对比 ym2413.c ← **下一步**
-3. [ ] conv_vol hex 生成 (从 STC ym_conv_vol 提取 2048B + 偏移版)
-4. [ ] 微码生成 (gen_microcode.py, 864B TDM 步序列)
-5. [ ] RTL: fm6_core.v (先 1 通道, 再 6 通道 TDM)
-6. [ ] tb: 单通道 FM 音符验证 + WAV 试听
-7. [ ] 接线表 (26 片逐脚, 接口层 + 核心层 + FM 层分开)
-8. [ ] 上板验证
+2. [x] conv_vol hex 生成 (从 STC ym_conv_vol 提取 2048B + 偏移版)
+3. [x] RTL: fm6_core.v (单通道 2-op FM, 实例化 hc283 做 NCO 加法器)
+4. [x] tb: fm6_note_tb.v 单通道 FM 音符验证 + WAV 输出
+5. [x] 仿真验证: 440Hz 载波正确, FM 调制产生边带 (880Hz), 过零频率 437.6Hz ≈ 440Hz
+6. [ ] **6 通道 TDM 分时** (fm6_core.v 扩展, HCNT ÷216)
+7. [ ] ADSR 包络状态机 RTL (HC161+CD4029)
+8. [ ] 反馈 fb (第一版只 fb=0/1)
+9. [ ] 接线表 (26 片逐脚, 接口层 + 核心层 + FM 层分开)
+10. [ ] 上板验证
