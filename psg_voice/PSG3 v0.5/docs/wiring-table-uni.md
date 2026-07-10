@@ -274,7 +274,10 @@ period12 = {reg4[7:4], reg3[7:0]} = 12-bit
 | 10 (UD) | ← **uni_ud (U32 门3 mux 输出)** | 方向: fold=1三角折返 / fold=0单向(~dir) |
 | 15 (CLK) | ← **clk (4MHz)** | 连续时钟 |
 | 3,4,6,11 (JAM) | → GND | |
-| 12,13,14,2 (Q1-4) | → U29.D0-3 (HC273) | **4-bit 波形输出** |
+| 12 (Q1) | → U29.P3 (D0) | Q1=bit0(LSB) → HC273 D0 |
+| 13 (Q2) | → U29.P4 (D1) | Q2=bit1 → HC273 D1 |
+| 14 (Q3) | → U29.P7 (D2) | Q3=bit2 → HC273 D2 |
+| 2 (Q4) | → U29.P8 (D3) | Q4=bit3(MSB) → HC273 D3 |
 | 7 (CO) | → **U23 门2 (反相成 ~CO = at_extreme)** → U25 J/K | 极值信号 (仅三角折返用) |
 
 > CD4029 按 UD 加/减, CI=L(freq_tc) 时走一步. 周期由 fold 决定:
