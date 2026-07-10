@@ -256,11 +256,22 @@ module psg3_top (
     // ---- HC08 AND (counter AND duty4) → AND输出 (位掩码调制) ----
     wire [3:0] uni_and_out = uni_wave_clean & uni_duty;
 
-    // ---- HC153 二选一: mode_sel 选比较/AND, 所有波形统一 (无特殊判断) ----
-    // mode_sel=1 → HC283 比较输出 (阈值调制, 锯齿+比较=方波)
-    // mode_sel=0 → HC08 AND 输出 (位掩码, duty=15 时 = 原始波形)
+    // ---- HC157 四 2选1: mode_sel 选比较/AND, 所有波形统一 (无特殊判断) ----
+    // HC157: Select=1 → Y=B, Select=0 → Y=A.
+    // mode_sel=1 → 选 B(比较输出 C4 广播4位, 阈值调制, 锯齿+比较=方波)
+    // mode_sel=0 → 选 A(AND 输出, 位掩码, duty=15 时 = 原始波形)
+    // ⚠️ 必须用 HC157 (四 2选1, 4个Y输出), 不是 HC153 (双4选1, 仅2个Y输出).
     wire [3:0] uni_sel;
-    assign uni_sel = uni_mode ? uni_cmp_out : uni_and_out;
+    hc157 u_unimux (
+        .Select(uni_mode),      // P1: mode_sel (R5.Q4)
+        .A1(uni_and_out[0]), .B1(uni_cmp_out[0]),   // P2,P3
+        .A2(uni_and_out[1]), .B2(uni_cmp_out[1]),   // P5,P6
+        .A3(uni_and_out[2]), .B3(uni_cmp_out[2]),   // P13,P14
+        .A4(uni_and_out[3]), .B4(uni_cmp_out[3]),   // P10,P11
+        .Enable_n(1'b0),       // P15: 常开
+        .Y1(uni_sel[0]), .Y2(uni_sel[1]),           // P4,P7
+        .Y3(uni_sel[2]), .Y4(uni_sel[3])            // P9,P12
+    );
 
     // ---- TLC7524 #1 波形生成 (DB4-7=sel, REF=5V) ----
     wire [7:0] uni_wave_db = {uni_sel, 4'b0000};

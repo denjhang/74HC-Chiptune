@@ -22,14 +22,14 @@
                      │    │ HC283 (比较)   │ HC08 (AND)    │
                      │    │ Q<duty → 15/0  │ Q & duty      │
                      │    └───────┬────────┴───────┬───────┘
-                     └──── HC153 选 ───────────────┘
+                     └──── HC157 选 ───────────────┘
                               │ wave_sel + mode_sel 控制
                     TLC7524#1 (波形) → TLC7524#2 (音量) → 喇叭
 ```
 
 **波形切换** (wave_sel 2-bit = dir+fold, mode_sel 1-bit):
 ```
-wave_sel | dir|fold| 波形   | CD4029 行为        | 周期  | HC153 选
+wave_sel | dir|fold| 波形   | CD4029 行为        | 周期  | HC157 选
 ---------|----|----|--------|-------------------|-------|----------
   00     | 0  | 0  | 锯齿   | 单向加 0→15→0      | 16步  | mode_sel 选
   01     | -  | 1  | 三角   | HC112折返 0→15→0   | 30步  | mode_sel 选
@@ -97,7 +97,7 @@ period12 = {reg4[7:4], reg3[7:0]} = 12-bit
 | U25 | 74HC112 | 折返方向控制 (下降沿JK, 替代CD4027, 库存有) |
 | U26 | 74HC283 | **4-bit 加法器做比较** (duty-counter看进位, 替代HC85, 库存有) |
 | U27 | 74HC08 | **4-bit AND** (counter AND duty → 位掩码调制) |
-| U28 | 74HC153 | **二选一** (方波=比较, 其他=mode_sel选比较/AND) |
+| U28 | 74HC157 | **四 2选1** (mode_sel 选 AND/比较, 4 路独立, 库存有) |
 | U29 | 74HC273 | 毛刺滤除 (4-bit, clk 反相沿) |
 | U30 | TLC7524 | #1 波形生成 (DB4-7, REF=5V) |
 | U31 | TLC7524 | #2 音量衰减 (DB4-7=vol4, REF=#1输出) |
@@ -171,7 +171,7 @@ period12 = {reg4[7:4], reg3[7:0]} = 12-bit
 | 5 (Q1) | duty[1] | → U26 HC283 A2 + U27 HC08 门2B |
 | 6 (Q2) | duty[2] | → U26 HC283 A3 + U27 HC08 门3B |
 | 9 (Q3) | duty[3] | → U26 HC283 A4 + U27 HC08 门4B |
-| 12 (Q4) | mode_sel | → U28 HC153 (二选一控制, 选比较/AND) |
+| 12 (Q4) | mode_sel | → U28 HC157 P1 (Select, 选比较/AND) |
 | 15 (Q5) | wave_sel[0]=fold | → U23 门4 (fold 反相器输入) |
 | 16 (Q6) | wave_sel[1]=dir | → U23 门3 (dir 反相器输入) |
 | 19 (Q7) | 预留 | 悬空 |
@@ -375,7 +375,7 @@ fold | uni_ud 来源        | 波形
 | 6 (B1) | ← **~counter[0] (U33 门2, Y2=P4)** | B = ~counter bit0 (LSB) |
 | 7 (C0) | → **+5V** | 进位输入=1 (补码加法的+1) |
 | 8 (GND) | → GND | |
-| 9 (C4) | **→ U28 HC153 (比较输出路径)** | C4=1 表示 duty≥counter → 高 (占空比/阈值调制) |
+| 9 (C4) | **→ U28 HC157 B1-4 (比较输出, 广播4位)** | C4=1 表示 duty≥counter → 高 (占空比/阈值调制) |
 | 10 (Σ4) | 悬空 | 和输出 bit4(MSB) 不用 |
 | 11 (B4) | ← **~counter[3] (U33 门5, Y5=P10)** | B = ~counter bit3 (MSB) |
 | 12 (A4) | ← **duty[3] (R5.Q3, P9)** | A = duty bit3 (被减数, MSB) |
@@ -400,15 +400,15 @@ fold | uni_ud 来源        | 波形
 |-----|------|------|
 | 1 (A1) | ← U29.Q0 (P2, counter bit0) | 门1 输入 A |
 | 2 (B1) | ← R5.Q0 (P2, duty bit0) | 门1 输入 B |
-| 3 (Y1) | → U28 (HC153 AND 输出路径 bit0) | counter AND duty bit0 |
+| 3 (Y1) | → U28.P2 (HC157 A1, AND bit0) | counter AND duty bit0 |
 | 4 (A2) | ← U29.Q1 (P5, counter bit1) | 门2 输入 A |
 | 5 (B2) | ← R5.Q1 (P5, duty bit1) | 门2 输入 B |
-| 6 (Y2) | → U28 (AND 输出路径 bit1) | |
+| 6 (Y2) | → U28.P5 (HC157 A2, AND bit1) | AND bit1 |
 | 7 (GND) | → GND | |
-| 8 (Y3) | → U28 (AND 输出路径 bit2) | |
+| 8 (Y3) | → U28.P13 (HC157 A3, AND bit2) | AND bit2 |
 | 9 (A3) | ← U29.Q2 (P6, counter bit2) | 门3 输入 A |
 | 10 (B3) | ← R5.Q2 (P6, duty bit2) | 门3 输入 B |
-| 11 (Y4) | → U28 (AND 输出路径 bit3) | |
+| 11 (Y4) | → U28.P10 (HC157 A4, AND bit3) | AND bit3 |
 | 12 (A4) | ← U29.Q3 (P9, counter bit3) | 门4 输入 A |
 | 13 (B4) | ← R5.Q3 (P9, duty bit3) | 门4 输入 B |
 | 14 (VCC) | → +5V | |
@@ -416,36 +416,40 @@ fold | uni_ud 来源        | 波形
 > counter AND duty4 → 保留 duty4=1 的位, 屏蔽=0 的位 → 降精度加量化高频.
 > duty4=15(1111) 时 AND=原始 counter, duty4=0 时静音.
 
-### U28 — 74HC153 (二选一波形选择)
+### U28 — 74HC157 (四 2选1, mode_sel 选 AND/比较)
 
-> HC153 DIP-16 引脚 (据 Nexperia datasheet, v0.3 已查证):
-> P1=1G_n P2=A(S0) P3=1C3 P4=1C2 P5=1C1 P6=1C0 P7=1Y P8=GND
-> P9=B(S1) P10=2Y P11=2C0 P12=2C1 P13=2C2 P14=2C3 P15=2G_n P16=VCC
-> 上下半部共享 A/B 地址 (CLAUDE.md 7.2 已查证).
+> HC157 DIP-16 引脚 (据 hc157.v 模型, TI 74HC157 datasheet):
+> P1=Select(S) P2=A1 P3=B1 P4=Y1 P5=A2 P6=B2 P7=Y2 P8=GND
+> P9=Y3 P10=A4 P11=B4 P12=Y4 P13=A3 P14=B3 P15=/Enable(低有效) P16=VCC
+> 功能: /Enable=0 时, Select=0 → Y=A, Select=1 → Y=B. 4 路独立 2选1, 共享 S 和 /E.
+>
+> ⚠️ **为何不用 HC153**: HC153 是双 4选1 (2 位地址选 4 路之 1), 只有 1Y/2Y 两个输出.
+> 波形通道需要 4 个独立 2选1 (mode_sel 在 AND 结果和比较结果间选, 每位独立),
+> 必须用 HC157 (四 2选1, 4 个 Y 输出). 之前接线表错用 HC153 是选型错误.
 
 | Pin | 信号 | 连接 |
 |-----|------|------|
-| 1 (1G_n) | → GND | 上半部常开 |
-| 2 (A) | ← 选择信号 (wave_sel/mode_sel 译码) | 地址 S0 |
-| 3 (1C3) | ← U26 C4 (比较输出) | 1C3=比较 |
-| 4 (1C2) | ← U26 C4 (比较输出) | 1C2=比较 |
-| 5 (1C1) | ← U27.Y1 (AND 输出 bit0) | 1C1=AND |
-| 6 (1C0) | ← U27.Y1 (AND 输出 bit0) | 1C0=AND |
-| 7 (1Y) | → U30.DB4 (TLC7524#1 bit0) | **输出 bit0** |
+| 1 (Select) | ← **mode_sel (R5.Q4, P12)** | 0=选AND(A), 1=选比较(B) |
+| 2 (A1) | ← **U27.P3 (Y1, AND 输出 bit0)** | AND bit0 |
+| 3 (B1) | ← **U26.P9 (C4, 比较输出)** | 比较 bit0 (C4 广播 4 位) |
+| 4 (Y1) | → **U30.P7 (DB4, DAC bit0)** | 输出 bit0 (LSB) |
+| 5 (A2) | ← **U27.P6 (Y2, AND 输出 bit1)** | AND bit1 |
+| 6 (B2) | ← **U26.P9 (C4, 比较输出)** | 比较 bit1 |
+| 7 (Y2) | → **U30.P6 (DB5, DAC bit1)** | 输出 bit1 |
 | 8 (GND) | → GND | |
-| 9 (B) | ← 选择信号 (同 P2) | 地址 S1 (与 A 同信号) |
-| 10 (2Y) | → U30.DB5 (TLC7524#1 bit1) | **输出 bit1** |
-| 11 (2C0) | ← U27.Y2 (AND 输出 bit1) | 2C0=AND |
-| 12 (2C1) | ← U27.Y2 (AND 输出 bit1) | 2C1=AND |
-| 13 (2C2) | ← U26 C4 (比较输出) | 2C2=比较 |
-| 14 (2C3) | ← U26 C4 (比较输出) | 2C3=比较 |
-| 15 (2G_n) | → GND | 下半部常开 |
+| 9 (Y3) | → **U30.P5 (DB6, DAC bit2)** | 输出 bit2 |
+| 10 (A4) | ← **U27.P11 (Y4, AND 输出 bit3)** | AND bit3 (MSB) |
+| 11 (B4) | ← **U26.P9 (C4, 比较输出)** | 比较 bit3 |
+| 12 (Y4) | → **U30.P4 (DB7, DAC bit3)** | 输出 bit3 (MSB) |
+| 13 (A3) | ← **U27.P8 (Y3, AND 输出 bit2)** | AND bit2 |
+| 14 (B3) | ← **U26.P9 (C4, 比较输出)** | 比较 bit2 |
+| 15 (/Enable) | → GND | 常开 (输出始终有效) |
 | 16 (VCC) | → +5V | |
 
-> 选择信号: A=B=0 → 选 AND (1C0/2C0), A=B=1 → 选比较 (1C3/2C3).
-> mode_sel=1 → 选比较 (锯齿+比较=方波, 三角+比较=削顶谐波)
-> mode_sel=0 → 选 AND (位掩码, duty=15 时 = 原始波形)
-> 所有波形统一, 无特殊判断. 方波 = 锯齿 + mode_sel=1.
+> mode_sel=0(Select=0) → Y=A(AND): counter AND duty4, 位掩码调制 (duty=15 时=原始波形)
+> mode_sel=1(Select=1) → Y=B(比较): C4 广播 4 位全同 (锯齿+比较=方波, 三角+比较=削顶谐波)
+> RTL 等效: `uni_sel = uni_mode ? uni_cmp_out : uni_and_out` (hc157.v 行为级)
+> HC157 的 4 个 B 输入全接 U26.P9(C4) 同一根线 (比较结果广播).
 
 ### U29 — 74HC273 (毛刺滤除, 4-bit)
 
@@ -479,10 +483,10 @@ Pin12=CS(→GND) / Pin13=WR(→GND) / Pin14=VDD(+5V) / Pin15=REF / Pin16=RFB.
 | 1 (OUT1) | → **U31.P15 (REF)** | 波形模拟量 (给音量 DAC 当 REF) |
 | 2 (OUT2) | → GND | |
 | 3 (GND) | → GND | |
-| 4 (DB7) | ← HC153 选出波形 bit3 (MSB) | ⚠️ 见下方 HC153 位宽说明 |
-| 5 (DB6) | ← HC153 选出波形 bit2 | ⚠️ 见下方 HC153 位宽说明 |
-| 6 (DB5) | ← HC153 选出波形 bit1 | |
-| 7 (DB4) | ← HC153 选出波形 bit0 (LSB) | |
+| 4 (DB7) | ← U28.P12 (HC157 Y4, 波形 bit3 MSB) | 4-bit 波形 MSB |
+| 5 (DB6) | ← U28.P9 (HC157 Y3, 波形 bit2) | |
+| 6 (DB5) | ← U28.P7 (HC157 Y2, 波形 bit1) | |
+| 7 (DB4) | ← U28.P4 (HC157 Y1, 波形 bit0 LSB) | |
 | 8 (DB3) | → GND | 低 4 位接地 (4-bit 精度) |
 | 9 (DB2) | → GND | |
 | 10 (DB1) | → GND | |
@@ -492,11 +496,6 @@ Pin12=CS(→GND) / Pin13=WR(→GND) / Pin14=VDD(+5V) / Pin15=REF / Pin16=RFB.
 | 14 (VDD) | → +5V | |
 | 15 (REF) | → +5V | 满量程基准 |
 | 16 (RFB) | → GND | |
-
-> ⚠️ **HC153 位宽待确认**: HC153 是双 4选1, 只有 1Y(P7)/2Y(P10) 两个输出,
-> 但 DAC 要 4 位波形 (DB4-DB7). 当前接线表只列 1 片 U28, 如何驱动 4 位?
-> 可能方案: (a) 用 2 片 HC153 (b) 153 只选 1-2 位其余固定 (c) 复用.
-> **此问题需 CEO 确认后再补具体 DB4-DB7 ← HC153 的逐 Pin 接线.**
 
 ### U31 — TLC7524 #2 (音量衰减)
 
@@ -560,10 +559,10 @@ Pin12=CS(→GND) / Pin13=WR(→GND) / Pin14=VDD(+5V) / Pin15=REF / Pin16=RFB.
 | HC112 (U25) | P16 | P8 |
 | HC283 (U26) | P16 | P8 |
 | HC08 (U27) | P14 | P7 |
-| HC153 (U28) | P16 | P8 |
+| HC157 (U28) | P16 | P8 |
 | HC273 (U29) | P20 | P10 |
 | TLC7524 (U30, U31) | P14 | P3 |
 | HC04 (U33) | P14 | P7 |
 
 > 每片 VDD 就近加 0.1μF 去耦. 所有 GND 共地.
-> 波形通道共 14 片: 3×HC161 + 2×HC00(U23/U32) + CD4029 + HC112 + HC283 + HC08 + HC153 + HC273 + 2×TLC7524 + HC04(U33).
+> 波形通道共 14 片: 3×HC161 + 2×HC00(U23/U32) + CD4029 + HC112 + HC283 + HC08 + HC157 + HC273 + 2×TLC7524 + HC04(U33).
