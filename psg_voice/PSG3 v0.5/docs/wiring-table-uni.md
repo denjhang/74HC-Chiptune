@@ -41,8 +41,8 @@ wave_sel | dir|fold| 波形   | CD4029 行为        | 周期  | HC157 选
 - 锯齿族 (fold=0): 单向回绕, 16步/周期, freq=4M/(16×(4096-p12))
 - 三角 (fold=1): HC112 折返, 30步/周期, freq=4M/(30×(4096-p12))
 
-方波 = 锯齿底子 (fold=0+dir=0) + 强制走 HC283 比较 (mode_sel 无效).
-mode_sel 只对三角/锯齿/反锯齿有效 (方波固定比较).
+方波 = 锯齿底子 (fold=0+dir=0) + mode_sel=1 (HC283 比较). 所有波形统一, 无特殊判断.
+mode_sel 对所有波形有效 (方波也能用 AND 模式).
 
 **duty4 = 音色调制参数**:
 - 方波: duty 控占空比 (duty=8 → 50%)
@@ -62,7 +62,7 @@ reg5 (0x20): duty[3:0] | wave_sel[1:0] | mode_sel | 预留  ← 音色
   wave_sel[1] = dir  (0=加=锯齿/方波, 1=减=反锯齿)
   wave_sel[0] = fold (0=单向16步=锯齿族, 1=折返30步=三角)
   → wave_sel 编码: 00锯齿 01三角 10方波 11反锯齿
-  方波 = dir=0 + fold=0 + 强制走 HC283 比较 (mode_sel 无效)
+  方波 = 锯齿(dir=0,fold=0) + mode_sel=1(比较), 无特殊判断
   mode_sel: 1=HC283比较(阈值调制) 0=HC08 AND(位掩码调制)
 ```
 

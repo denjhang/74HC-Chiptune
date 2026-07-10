@@ -3,20 +3,21 @@
  * 一个 CD4029 4-bit 计数器, wave_sel 切换波形:
  *   00 锯齿  01 三角  10 方波  11 反锯齿
  *
- * 周期分两类 (核心: 有无 CD4027 折返):
+ * 周期分两类 (核心: 有无 HC112 折返):
  *   锯齿族 (锯齿/方波/反锯齿): 单向回绕 = 16步/周期
  *       freq = 4MHz / (16 × (4096 - period12))
  *   三角 (折返 0→15→0): 30步/周期
  *       freq = 4MHz / (30 × (4096 - period12))
  *
- * 寄存器 (24bit = 3 reg):
- *   reg0: period12[7:0]
- *   reg1: period12[11:8] | vol[3:0]       (频率+音量在一起)
- *   reg2: duty[3:0] | wave_sel[1:0] | mode_sel | 预留
+ * 寄存器 (24bit = 3 reg, 对应总线 reg3/4/5):
+ *   reg3: period12[7:0]
+ *   reg4: period12[11:8] | vol[3:0]       (频率+音量在一起)
+ *   reg5: duty[3:0] | mode_sel | wave_sel[1:0] | 预留
  *         wave_sel[1] = dir  (0=加=锯齿, 1=减=反锯齿)
  *         wave_sel[0] = fold (0=单向16步, 1=折返30步=三角)
- *         方波 = dir=0 + fold=0 + 强制走 HC85 比较 (mode_sel 无效)
- *         mode_sel: 1=HC85比较(阈值调制) 0=HC08 AND(位掩码)
+ *         所有波形统一, 无特殊判断. 方波 = 锯齿 + mode_sel=1(比较).
+ *         mode_sel: 1=HC283比较(阈值调制) 0=HC08 AND(位掩码)
+ *         选通芯片: HC157 (四 2选1), 非 HC153.
  *
  * 编译: PATH="/d/msys64/mingw64/bin:$PATH" gcc -O2 -std=c99 uni_sim.c -o uni_sim.exe -lm
  * 运行: ./uni_sim          # 精度表 (双套: 16步族 + 30步三角)
@@ -48,7 +49,7 @@ typedef struct {
     /* CD4029 4-bit 可逆计数器 (16步波形) */
     int tri_q;          /* 0..15 */
     int tri_ud;         /* 1=加 0=减 */
-    /* CD4027 方向 (三角折返) */
+    /* HC112 方向 (三角折返, 替代 CD4027) */
     int dir_q;
     /* 控制参数 */
     int wave_sel;       /* 0-3 */
@@ -69,7 +70,7 @@ static int sim_step(hw_t *h) {
     if (freq_tc) {
         int wave = h->wave_sel;
         if (wave == WAVE_TRI) {
-            /* 三角: CD4027 折返, 0→15→0, 30步/周期 */
+            /* 三角: HC112 折返, 0→15→0, 30步/周期 */
             int at_extreme = ((h->tri_ud && h->tri_q == 15) ||
                              (!h->tri_ud && h->tri_q == 0));
             if (at_extreme) h->dir_q ^= 1;
@@ -86,21 +87,18 @@ static int sim_step(hw_t *h) {
     return freq_tc;
 }
 
-/* 输出计算: mode_sel 选 比较输出(HC85) 或 AND输出(HC08) */
+/* 输出计算: mode_sel 选 比较输出(HC283) 或 AND输出(HC08) */
 static unsigned wave_out(const hw_t *h) {
     unsigned q = h->tri_q;
 
-    /* HC85 比较: q < duty → 全高 (阈值调制) */
+    /* HC283 比较: q < duty → 全高 (阈值调制) */
     unsigned cmp = (q < (unsigned)h->duty) ? 15 : 0;
     /* HC08 AND: q & duty (位掩码调制) */
     unsigned and_out = q & (unsigned)h->duty;
 
-    /* 方波: 固定比较输出 (占空比) */
-    if (h->wave_sel == WAVE_SQUARE) return cmp;
-
-    /* 三角/锯齿/反锯齿: mode_sel 选 比较输出 或 AND输出 */
-    /* mode_sel=1: 比较 (三角→削顶方波, 加奇次谐波) */
-    /* mode_sel=0: AND  (三角→位掩码, 加量化高频) */
+    /* 所有波形统一, 无特殊判断. 方波 = 锯齿 + mode_sel=1(比较).
+     * mode_sel=1: HC157 选比较 (三角→削顶方波, 加奇次谐波)
+     * mode_sel=0: HC157 选 AND  (三角→位掩码, 加量化高频) */
     if (h->mode_sel) return cmp;
     return and_out;
 }
@@ -182,7 +180,7 @@ int main(int argc, char **argv) {
         /* 三角表 (30步) */
         printf("/* PSG3 v0.5 period12 查找表 — 三角 (30步@4MHz) */\n");
         printf("/* freq=4000000/(30×(4096-p12)), A4=440 十二平均律 */\n");
-        printf("/* 覆盖: 三角, CD4027折返 0→15→0, 30步/周期 */\n");
+        printf("/* 覆盖: 三角, HC112折返 0→15→0, 30步/周期 */\n");
         printf("const unsigned uni_period12_tri[109] = {\n");
         printf("    /* MIDI 0-23 超范围 */\n    ");
         for (int m = 0; m < MIDI_LO; m++) { printf("0,"); if((m+1)%12==0) printf("\n    "); }
@@ -376,9 +374,9 @@ int main(int argc, char **argv) {
            u1, N_NOTES, wm, note_freq(wm), worst);
     }
 
-    printf("\n寄存器: reg0=period[7:0], reg1=period[11:8]|vol[3:0], reg2=duty|wave[1:0]|mode|预留\n");
+    printf("\n寄存器: reg3=period[7:0], reg4=period[11:8]|vol[3:0], reg5=duty|mode|wave[1:0]|预留\n");
     printf("  wave_sel[1]=dir(0锯齿/1反锯齿), wave_sel[0]=fold(0单向16步/1折返30步)\n");
-    printf("  方波 = dir=0+fold=0+强制比较\n");
+    printf("  所有波形统一, 方波=锯齿+mode_sel=1(比较), 选通HC157\n");
     printf("\n./uni_sim table  → 双查找表\n");
     printf("./uni_sim wav    → 4波形扫频WAV\n");
     return 0;
