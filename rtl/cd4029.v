@@ -3,24 +3,27 @@
 // CD4029B — 16-pin DIP 封装
 // 同步可预置可逆计数器, 带进位前瞻
 //
-// 引脚映射 (DIP-16) — 据 ST HCF4029B / Fairchild CD4029BC / TI CD4029B datasheet 核对
-// (三者引脚与功能一致, JEDEC B 系列 CMOS 标准):
+// 引脚映射 (DIP-16) — 实物丝印核对 (CEO 2026-07-09 实测):
 //   Pin  1: PE   (PRESET ENABLE, 预置使能, 高有效, 异步)
 //   Pin  2: Q4   (输出位 4, MSB)
-//   Pin  3: JAM4 (预置输入位 4)
-//   Pin  4: JAM3 (预置输入位 3)
-//   Pin  5: CI   (CARRY IN, 进位输入/计数使能, 低有效: L=允许计数)
-//   Pin  6: JAM2 (预置输入位 2)
-//   Pin  7: CO   (CARRY OUT, 进位/借位输出, 低有效)
+//   Pin  3: J4   (预置输入位 4, MSB)
+//   Pin  4: J1   (预置输入位 1, LSB)
+//   Pin  5: Cin  (CARRY IN, 进位输入/计数使能, 低有效: L=允许计数)
+//   Pin  6: Q1   (输出位 1, LSB)
+//   Pin  7: Cout (CARRY OUT, 进位/借位输出, 低有效)
 //   Pin  8: VSS  (地)
-//   Pin  9: BD   (BINARY/DECADE, H=二进制0-15, L=十进制0-9)
-//   Pin 10: UD   (UP/DOWN, H=加, L=减)
-//   Pin 11: JAM1 (预置输入位 1, LSB)
-//   Pin 12: Q1   (输出位 1, LSB)
-//   Pin 13: Q2   (输出位 2)
+//   Pin  9: B/D  (BINARY/DECADE, H=二进制0-15, L=十进制0-9)
+//   Pin 10: U/D  (UP/DOWN, H=加, L=减)
+//   Pin 11: Q2   (输出位 2)
+//   Pin 12: J2   (预置输入位 2)
+//   Pin 13: J3   (预置输入位 3)
 //   Pin 14: Q3   (输出位 3)
 //   Pin 15: CLK  (时钟, 上升沿触发)
 //   Pin 16: VDD  (正电源)
+//
+// ⚠️ 注意 JAM/Q 引脚排布不连续 (非顺序排列):
+//   Q 输出:  Q1=Pin6, Q2=Pin11, Q3=Pin14, Q4=Pin2
+//   J 输入:  J1=Pin4, J2=Pin12, J3=Pin13, J4=Pin3
 //
 // 功能 (据 datasheet TRUTH TABLE):
 //   PE=H:        Q <= JAM (异步预置, 与时钟无关)
@@ -38,17 +41,17 @@
 `timescale 1ns/1ps
 
 module cd4029 (
-    input  PE,    // Pin 1: 预置使能 (高有效, 异步)
-    input  CI,    // Pin 5: 进位输入 (低有效: L=允许计数)
-    input  BD,    // Pin 9: 二进制/十进制 (H=二进制)
+    input  PE,    // Pin 1:  预置使能 (高有效, 异步)
+    input  CI,    // Pin 5:  进位输入 (低有效: L=允许计数)
+    input  BD,    // Pin 9:  二进制/十进制 (H=二进制)
     input  UD,    // Pin 10: 加/减 (H=加)
     input  CLK,   // Pin 15: 时钟 (上升沿触发)
-    input  JAM1,  // Pin 11: 预置位 1 (LSB)
-    input  JAM2,  // Pin 6:  预置位 2
-    input  JAM3,  // Pin 4:  预置位 3
+    input  JAM1,  // Pin 4:  预置位 1 (LSB)
+    input  JAM2,  // Pin 12: 预置位 2
+    input  JAM3,  // Pin 13: 预置位 3
     input  JAM4,  // Pin 3:  预置位 4 (MSB)
-    output Q1,    // Pin 12: 输出位 1 (LSB)
-    output Q2,    // Pin 13: 输出位 2
+    output Q1,    // Pin 6:  输出位 1 (LSB)
+    output Q2,    // Pin 11: 输出位 2
     output Q3,    // Pin 14: 输出位 3
     output Q4,    // Pin 2:  输出位 4 (MSB)
     output CO     // Pin 7:  进位/借位输出 (低有效)
