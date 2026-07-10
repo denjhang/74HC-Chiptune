@@ -256,17 +256,11 @@ module psg3_top (
     // ---- HC08 AND (counter AND duty4) → AND输出 (位掩码调制) ----
     wire [3:0] uni_and_out = uni_wave_clean & uni_duty;
 
-    // ---- HC153 三路选择: 原始Q / 比较输出 / AND输出 ----
-    // 方波(wave=10): 固定用比较输出 (占空比方波)
-    // 其他波形: mode_sel=1→比较(阈值调制), mode_sel=0→AND(位掩码)
-    //   mode_sel 对方波无效 (方波固定比较)
-    //   三角/锯齿: mode_sel=0 时也可以选原始Q? 不, AND=15(1111)时=原始Q, AND=0时静音
-    //   其实 mode_sel=0 + duty=15(1111) = 原始Q (AND全1 = 原值)
-    //   mode_sel=1 时 duty 控削顶
+    // ---- HC153 二选一: mode_sel 选比较/AND, 所有波形统一 (无特殊判断) ----
+    // mode_sel=1 → HC283 比较输出 (阈值调制, 锯齿+比较=方波)
+    // mode_sel=0 → HC08 AND 输出 (位掩码, duty=15 时 = 原始波形)
     wire [3:0] uni_sel;
-    assign uni_sel = (uni_wave == 2'b10) ? uni_cmp_out :        // 方波: 比较
-                     (uni_mode      ) ? uni_cmp_out :            // mode=1: 比较
-                                       uni_and_out;              // mode=0: AND
+    assign uni_sel = uni_mode ? uni_cmp_out : uni_and_out;
 
     // ---- TLC7524 #1 波形生成 (DB4-7=sel, REF=5V) ----
     wire [7:0] uni_wave_db = {uni_sel, 4'b0000};

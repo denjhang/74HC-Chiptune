@@ -46,8 +46,8 @@ module psg3_uni_tb;
 
         // ============ 波形通道 (reg3/4/5, clk=4MHz) ============
         // A4=440: 锯齿族16步 p12=3528, 三角30步 p12=3793
-        $display("Test1: 波形-方波 50%% A4 (16步)");
-        set_uni(12'd3528, 4'd15, 4'd8, 2'b10, 1'b0);
+        $display("Test1: 波形-方波 50%% A4 (16步, 锯齿+比较)");
+        set_uni(12'd3528, 4'd15, 4'd8, 2'b10, 1'b1);  // 锯齿底子 + mode=1(比较) = 方波
         mx=0; mn=255;
         for(i=0;i<40000;i=i+1) begin @(posedge clk); #1; if(uni_a>mx) mx=uni_a; if(uni_a<mn) mn=uni_a; end
         $display("  uni_audio: %0d~%0d (期望 0~240)", mn, mx);

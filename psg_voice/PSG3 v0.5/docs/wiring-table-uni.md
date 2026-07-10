@@ -183,30 +183,85 @@ period12 = {reg4[7:4], reg3[7:0]} = 12-bit
 
 ### U20-U22 — 74HC161×3 (period12 上计数器)
 
-级联: U20 CEP/CET=1, U21 CEP/CET=U20.TC, U22 CEP/CET=U21.TC.
-U22.TC = freq_tc. TC→PE 共用 (3 片同时 reload).
+> 74HC161 DIP-16 引脚 (据 Nexperia/TI datasheet 核对):
+> P1=MR P2=CP P3=P0 P4=P1 P5=P2 P6=P3 P7=CEP P8=GND P9=PE P10=CET P11=Q3 P12=Q2 P13=Q1 P14=Q0 P15=TC P16=VCC
 
-| 位号 | D0-3 来源 | 说明 |
-|------|----------|------|
-| U20 | period12[3:0] = reg3.Q0-3 | 低位 |
-| U21 | period12[7:4] = reg3.Q4-7 | 中位 |
-| U22 | period12[11:8] = reg4.Q4-7 | 高位, TC=freq_tc |
+**U20 (低位, period12[3:0]):**
 
-3 片共用: MR←rst_n, CP←clk, PE←U23.Y1 (freq_tc 反相).
+| Pin | 信号 | 连接 |
+|-----|------|------|
+| 1 (MR) | ← rst_n | 复位 (低有效) |
+| 2 (CP) | ← clk (4MHz) | 计数时钟 |
+| 3 (P0) | ← R3.Q0 (period12[0]) | 预置 bit0 |
+| 4 (P1) | ← R3.Q1 (period12[1]) | 预置 bit1 |
+| 5 (P2) | ← R3.Q2 (period12[2]) | 预置 bit2 |
+| 6 (P3) | ← R3.Q3 (period12[3]) | 预置 bit3 |
+| 7 (CEP) | → +5V | 常使能 |
+| 8 (GND) | → GND | |
+| 9 (PE) | ← U23.Y1 (P3, ~freq_tc) | 计满预置 (3 片共用) |
+| 10 (CET) | → +5V | 常使能 |
+| 11-14 (Q3-Q0) | 悬空 | (只内部 TC 用) |
+| 15 (TC) | → U21.CEP(P7), U21.CET(P10) | **级联高位** |
+| 16 (VCC) | → +5V | |
+
+**U21 (中位, period12[7:4]):**
+
+| Pin | 信号 | 连接 |
+|-----|------|------|
+| 1 (MR) | ← rst_n | |
+| 2 (CP) | ← clk | |
+| 3 (P0) | ← R3.Q4 (period12[4]) | |
+| 4 (P1) | ← R3.Q5 (period12[5]) | |
+| 5 (P2) | ← R3.Q6 (period12[6]) | |
+| 6 (P3) | ← R3.Q7 (period12[7]) | |
+| 7 (CEP) | ← U20.TC (P15) | 级联使能 |
+| 8 (GND) | → GND | |
+| 9 (PE) | ← U23.Y1 (P3, ~freq_tc) | 共用预置 |
+| 10 (CET) | ← U20.TC (P15) | 级联使能 |
+| 11-14 (Q3-Q0) | 悬空 | |
+| 15 (TC) | → U22.CEP(P7), U22.CET(P10) | **级联高位** |
+| 16 (VCC) | → +5V | |
+
+**U22 (高位, period12[11:8], TC=freq_tc):**
+
+| Pin | 信号 | 连接 |
+|-----|------|------|
+| 1 (MR) | ← rst_n | |
+| 2 (CP) | ← clk | |
+| 3 (P0) | ← R4.Q4 (period12[8]) | |
+| 4 (P1) | ← R4.Q5 (period12[9]) | |
+| 5 (P2) | ← R4.Q6 (period12[10]) | |
+| 6 (P3) | ← R4.Q7 (period12[11]) | |
+| 7 (CEP) | ← U21.TC (P15) | 级联使能 |
+| 8 (GND) | → GND | |
+| 9 (PE) | ← U23.Y1 (P3, ~freq_tc) | 共用预置 |
+| 10 (CET) | ← U21.TC (P15) | 级联使能 |
+| 11-14 (Q3-Q0) | 悬空 | |
+| 15 (TC) | → **freq_tc** (= U23 门1 输入 + 赋给 uni_freq_tc) | **最高位进位=频率脉冲** |
+| 16 (VCC) | → +5V | |
 
 ### U23 — 74HC00 (4 门全用: 反相器组)
 
-HC00 四 2输入与非门, 两输入接一起当反相器用. 本项目 4 门全占满.
+> HC00 DIP-14: 门1=P1(A)/P2(B)/P3(Y) 门2=P4(A)/P5(B)/P6(Y) 门3=P9(A)/P10(B)/P8(Y) 门4=P12(A)/P13(B)/P11(Y). P14=VCC P7=GND.
+> 反相器接法: A 和 B (P1+P2 等) 接同一信号, Y = ~(A·A) = ~A.
 
-| 门 | 输入 | 输出 | 用途 |
-|----|------|------|------|
-| 门1 | freq_tc, freq_tc (U22.TC) | **~freq_tc → PE** (U20-22) | period12 reload 反相 |
-| 门2 | CO, CO (U24 Pin7) | **~CO** | CD4029 进位反相 (给 at_extreme) |
-| 门3 | dir, dir (reg5 bit3) | **~dir** | 方向反相 (给 U32 mux) |
-| 门4 | fold, fold (reg5 bit2) | **~fold** | 折返开关反相 (给 U32 mux) |
+| Pin | 信号 | 连接 |
+|-----|------|------|
+| 1 (A1) | ← freq_tc (U22.P15) | 门1输入 (短接P2) |
+| 2 (B1) | ← freq_tc (与P1短接) | 门1输入 |
+| 3 (Y1) | **→ ~freq_tc** | → U20-22.PE (P9, 3片共用) |
+| 4 (A2) | ← CO (U24.P7) | 门2输入 (短接P5) |
+| 5 (B2) | ← CO (与P4短接) | 门2输入 |
+| 6 (Y2) | **→ ~CO (at_extreme)** | → U25.P2 (1K), U25.P3 (1J) |
+| 7 (GND) | → GND | |
+| 8 (Y3) | **→ ~dir** | → U32.P4 (门2 A 输入) |
+| 9 (A3) | ← dir (R5.Q3, reg5 bit3) | 门3输入 (短接P10) |
+| 10 (B3) | ← dir (与P9短接) | 门3输入 |
+| 11 (Y4) | **→ ~fold** | → U32.P5 (门2 B 输入) |
+| 12 (A4) | ← fold (R5.Q2, reg5 bit2) | 门4输入 (短接P13) |
+| 13 (B4) | ← fold (与P12短接) | 门4输入 |
+| 14 (VCC) | → +5V | |
 
-> HC00 DIP-14: Pin1=A1,P2=B1,P3=Y1 / P4=A2,P5=B2,P6=Y2 / P9=A3,P10=B3,P8=Y3 / P12=A4,P13=B4,P11=Y4 / P14=VCC,P7=GND.
-> 反相器接法: A 和 B 接同一个输入, Y = ~(A·A) = ~A.
 > 门2的 ~CO 直接当 at_extreme (给 HC112 的 J/K). 不需要额外 AND —— CD4029 CO 真值表已含 CI=freq_tc 条件.
 
 ### U24 — CD4029 (4-bit 波形计数器)
@@ -266,21 +321,25 @@ fold | uni_ud 来源        | 波形
 
 ### U32 — 74HC00 (uni_ud 2选1 mux, 用 3 门)
 
-**功能**: `uni_ud = fold ? dir_qn : ~dir` (NAND 实现 2选1).
-fold=1(三角) 选 dir_qn(HC112折返), fold=0(锯齿族) 选 ~dir(固定方向).
+> HC00 DIP-14: 门1=P1(A)/P2(B)/P3(Y) 门2=P4(A)/P5(B)/P6(Y) 门3=P9(A)/P10(B)/P8(Y) 门4=P12(A)/P13(B)/P11(Y). P14=VCC P7=GND.
+> 功能: `uni_ud = fold ? dir_qn : ~dir` (NAND mux).
 
-**NAND mux 原理** (德摩根): `out = (fold·dir_qn) + (~fold·~dir) = ~( ~(fold·dir_qn) · ~(~fold·~dir) )`
-
-| 门 | 输入 A, B | 输出 Y | 去向 |
-|----|----------|--------|------|
-| 门1 | fold (reg5 bit2), dir_qn (U25 P6) | NAND1 = ~(fold·dir_qn) | → U32 门3 |
-| 门2 | ~fold (U23 门4), ~dir (U23 门3) | NAND2 = ~(~fold·~dir) | → U32 门3 |
-| 门3 | NAND1, NAND2 | **uni_ud = ~(NAND1·NAND2)** | → U24 CD4029 Pin10 (UD) |
-| 门4 | (备用) | — | HC112 的 CLR 直连 rst_n, 不需 ~rst_n 反相 |
-
-> HC00 DIP-14 引脚同 U23: P1/P2=A/B, P3=Y (门1) / P4/P5/P6 (门2) / P9/P10/P8 (门3) / P12/P13/P11 (门4).
-> 门4 备用 (接 GND 防悬空). U32 用 3 门做 mux, 门4 空出.
-> mux 三个门 = 完整 2选1, 不需要额外反相器 (~fold/~dir 由 U23 提供).
+| Pin | 信号 | 连接 |
+|-----|------|------|
+| 1 (A1) | ← fold (R5.Q2, reg5 bit2) | 门1 输入 A |
+| 2 (B1) | ← dir_qn (U25.P6, HC112 Q1_n) | 门1 输入 B |
+| 3 (Y1) | NAND1 = ~(fold·dir_qn) | → P9 (门3 A 输入) |
+| 4 (A2) | ← ~fold (U23.P11, 门4 Y4) | 门2 输入 A |
+| 5 (B2) | ← ~dir (U23.P8, 门3 Y3) | 门2 输入 B |
+| 6 (Y2) | NAND2 = ~(~fold·~dir) | → P10 (门3 B 输入) |
+| 7 (GND) | → GND | |
+| 8 (Y3) | **→ uni_ud** | → U24.P10 (CD4029 UD) |
+| 9 (A3) | ← NAND1 (U32.P3) | 门3 输入 A |
+| 10 (B3) | ← NAND2 (U32.P6) | 门3 输入 B |
+| 11 (Y4) | 悬空 | 门4 备用 |
+| 12 (A4) | → GND | 门4 防悬空 |
+| 13 (B4) | → GND | 门4 防悬空 |
+| 14 (VCC) | → +5V | |
 
 ### U26 — 74HC283 (4-bit 加法器, 做比较器用)
 
@@ -312,56 +371,58 @@ fold=1(三角) 选 dir_qn(HC112折返), fold=0(锯齿族) 选 ~dir(固定方向)
 
 ### U27 — 74HC08 (4-bit AND, 位掩码调制)
 
-**据 TI 74HC08 datasheet**: 四 2 输入与门, DIP-14. 用其中 4 个门做位掩码.
-counter AND duty4 → 保留 duty4 为 1 的位, 屏蔽为 0 的位 → 降精度加量化高频.
+> HC08 DIP-14: 门1=P1(A)/P2(B)/P3(Y) 门2=P4(A)/P5(B)/P6(Y) 门3=P9(A)/P10(B)/P8(Y) 门4=P12(A)/P13(B)/P11(Y). P14=VCC P7=GND.
 
-| 信号组 | 来源/去向 | 说明 |
-|--------|----------|------|
-| 门1 A | ← U29.Q0 (HC273 bit0) | counter bit0 |
-| 门1 B | ← reg5.Q4 (duty4 bit0) | 掩码 bit0 |
-| 门1 Y | → U28 (HC153, AND 输出路径 bit0) | Q0 AND duty0 |
-| 门2 A | ← U29.Q1 | counter bit1 |
-| 门2 B | ← reg5.Q5 (duty4 bit1) | 掩码 bit1 |
-| 门2 Y | → U28 (AND 输出路径 bit1) | |
-| 门3 A | ← U29.Q2 | counter bit2 |
-| 门3 B | ← reg5.Q6 (duty4 bit2) | 掩码 bit2 |
-| 门3 Y | → U28 (AND 输出路径 bit2) | |
-| 门4 A | ← U29.Q3 | counter bit3 |
-| 门4 B | ← reg5.Q7 (duty4 bit3) | 掩码 bit3 |
-| 门4 Y | → U28 (AND 输出路径 bit3) | |
-| VCC (P14), GND (P7) | +5V / GND | 74HC08 标准 DIP-14 电源 |
+| Pin | 信号 | 连接 |
+|-----|------|------|
+| 1 (A1) | ← U29.Q0 (P2, counter bit0) | 门1 输入 A |
+| 2 (B1) | ← R5.Q0 (P2, duty bit0) | 门1 输入 B |
+| 3 (Y1) | → U28 (HC153 AND 输出路径 bit0) | counter AND duty bit0 |
+| 4 (A2) | ← U29.Q1 (P5, counter bit1) | 门2 输入 A |
+| 5 (B2) | ← R5.Q1 (P5, duty bit1) | 门2 输入 B |
+| 6 (Y2) | → U28 (AND 输出路径 bit1) | |
+| 7 (GND) | → GND | |
+| 8 (Y3) | → U28 (AND 输出路径 bit2) | |
+| 9 (A3) | ← U29.Q2 (P6, counter bit2) | 门3 输入 A |
+| 10 (B3) | ← R5.Q2 (P6, duty bit2) | 门3 输入 B |
+| 11 (Y4) | → U28 (AND 输出路径 bit3) | |
+| 12 (A4) | ← U29.Q3 (P9, counter bit3) | 门4 输入 A |
+| 13 (B4) | ← R5.Q3 (P9, duty bit3) | 门4 输入 B |
+| 14 (VCC) | → +5V | |
 
-> RTL 等效: `uni_and_out = uni_wave_clean & uni_duty`.
-> 特殊性质: duty4=15(1111) 时 AND 输出 = 原始 counter (全 1 = 原值), duty4=0 时静音.
-> 因此 mode_sel=0(AND模式) 里 duty4 同时是音色调制参数和"降精度量"控制.
+> counter AND duty4 → 保留 duty4=1 的位, 屏蔽=0 的位 → 降精度加量化高频.
+> duty4=15(1111) 时 AND=原始 counter, duty4=0 时静音.
 
 ### U28 — 74HC153 (二选一波形选择)
 
-**据 TI 74HC153 datasheet**: 双 4 选 1 数据选择器, 上下半部共享地址 A/B.
-本项目用它选"比较输出"还是"AND输出" (二选一, 不是 4 选 1).
+> HC153 DIP-16 引脚 (据 Nexperia datasheet, v0.3 已查证):
+> P1=1G_n P2=A(S0) P3=1C3 P4=1C2 P5=1C1 P6=1C0 P7=1Y P8=GND
+> P9=B(S1) P10=2Y P11=2C0 P12=2C1 P13=2C2 P14=2C3 P15=2G_n P16=VCC
+> 上下半部共享 A/B 地址 (CLAUDE.md 7.2 已查证).
 
-| 选择条件 | HC153 选 | → TLC7524#1 (U30) DB4-7 | 波形效果 |
-|----------|---------|--------------------------|---------|
-| 方波 (wave=10) | 比较输出 (U26) | 高低电平 | 方波 (duty=占空比) |
-| 其他 + mode_sel=1 | 比较输出 (U26) | 阈值削顶 | 加奇次谐波 |
-| 其他 + mode_sel=0 | AND输出 (U27) | 位掩码降精度 | 加量化高频 |
+| Pin | 信号 | 连接 |
+|-----|------|------|
+| 1 (1G_n) | → GND | 上半部常开 |
+| 2 (A) | ← 选择信号 (wave_sel/mode_sel 译码) | 地址 S0 |
+| 3 (1C3) | ← U26 C4 (比较输出) | 1C3=比较 |
+| 4 (1C2) | ← U26 C4 (比较输出) | 1C2=比较 |
+| 5 (1C1) | ← U27.Y1 (AND 输出 bit0) | 1C1=AND |
+| 6 (1C0) | ← U27.Y1 (AND 输出 bit0) | 1C0=AND |
+| 7 (1Y) | → U30.DB4 (TLC7524#1 bit0) | **输出 bit0** |
+| 8 (GND) | → GND | |
+| 9 (B) | ← 选择信号 (同 P2) | 地址 S1 (与 A 同信号) |
+| 10 (2Y) | → U30.DB5 (TLC7524#1 bit1) | **输出 bit1** |
+| 11 (2C0) | ← U27.Y2 (AND 输出 bit1) | 2C0=AND |
+| 12 (2C1) | ← U27.Y2 (AND 输出 bit1) | 2C1=AND |
+| 13 (2C2) | ← U26 C4 (比较输出) | 2C2=比较 |
+| 14 (2C3) | ← U26 C4 (比较输出) | 2C3=比较 |
+| 15 (2G_n) | → GND | 下半部常开 |
+| 16 (VCC) | → +5V | |
 
-**HC153 输入接线** (4-bit, 上半部管 bit0-1, 下半部管 bit2-3):
-- 上半部: C0/C1 = U27 (AND) bit0/bit1, C2/C3 = U26 (比较) bit0/bit1
-- 下半部: C0/C1 = U27 (AND) bit2/bit3, C2/C3 = U26 (比较) bit2/bit3
-- 地址 A/B = 选择信号 (wave_sel + mode_sel 译码, 见下)
-
-**选择信号译码** (wave_sel + mode_sel → 2-bit 地址):
-```
-方波(wave=10): 强制选比较 (mode_sel 无效)
-其他波形 mode_sel=1: 选比较 (阈值调制)
-其他波形 mode_sel=0: 选 AND (位掩码)
-```
-RTL: `uni_sel = (wave==10) ? cmp_out : (mode_sel) ? cmp_out : and_out`.
-
-> ⚠️ **HC153 上下半部共享地址脚 A/B** (CLAUDE.md 7.2 已查证) — 两个 4 选 1 不能用不同地址.
-> 本项目上下半部用同一地址 (都选比较 或 都选 AND), 符合这个约束.
-> 原始 counter Q 不直接进 HC153 — mode_sel=0 + duty=15 时 AND 输出 = 原始 Q (全1=原值).
+> 选择信号: A=B=0 → 选 AND (1C0/2C0), A=B=1 → 选比较 (1C3/2C3).
+> mode_sel=1 → 选比较 (锯齿+比较=方波, 三角+比较=削顶谐波)
+> mode_sel=0 → 选 AND (位掩码, duty=15 时 = 原始波形)
+> 所有波形统一, 无特殊判断. 方波 = 锯齿 + mode_sel=1.
 
 ### U29 — 74HC273 (毛刺滤除, 4-bit)
 
@@ -411,25 +472,31 @@ Pin12=CS(→GND) / Pin13=WR(→GND) / Pin14=VDD(+5V) / Pin15=REF / Pin16=RFB.
 > 级联乘法衰减: OUT1_总 = 波形 × (vol/16). vol=0 静音, vol=15 满幅.
 > RTL 等效: `uni_atten = uni_wave_db * {uni_vol, 4'b0000}; uni_audio = atten[15:8]`.
 
-### U33 — 74HC04 (clk 反相, 波形通道自包含)
+### U33 — 74HC04 (clk 反相 + counter 反相, 波形通道自包含)
 
-波形通道自己的 HC04, 不借接口层. 用 5 个反相器门: 1 门做 ~clk, 4 门做 counter 反相给 283.
+> HC04 DIP-14: 门1=P1(A)/P2(Y) 门2=P3(A)/P4(Y) 门3=P5(A)/P6(Y) 门4=P9(A)/P8(Y) 门5=P11(A)/P10(Y) 门6=P13(A)/P12(Y). P14=VCC P7=GND.
 
-| 门 | 输入 (A) | 输出 (Y) | 去向 |
-|----|---------|---------|------|
-| 门1 (P1,P2) | clk (4MHz) | **~clk** | → U29 HC273 P11 (CP). (HC112 直连 clk, 不需 ~clk) |
-| 门2 (P3,P4) | counter[0] (U29 Q0) | **~counter[0]** | → U26 HC283 B1 |
-| 门3 (P5,P6) | counter[1] (U29 Q1) | **~counter[1]** | → U26 HC283 B2 |
-| 门4 (P9,P8) | counter[2] (U29 Q2) | **~counter[2]** | → U26 HC283 B3 |
-| 门5 (P11,P10) | counter[3] (U29 Q3) | **~counter[3]** | → U26 HC283 B4 |
-| 门6 (P13,P12) | → GND | 悬空 | 备用, 输入接 GND 防悬空 |
-| P14 | VCC | +5V | |
-| P7 | GND | | |
+| Pin | 信号 | 连接 |
+|-----|------|------|
+| 1 (A1) | ← clk (4MHz) | 门1 输入 |
+| 2 (Y1) | **→ ~clk** | → U29.P11 (HC273 CP) |
+| 3 (A2) | ← counter[0] (U29.Q0, P2) | 门2 输入 |
+| 4 (Y2) | **→ ~counter[0]** | → U26.P6 (HC283 B1) |
+| 5 (A3) | ← counter[1] (U29.Q5) | 门3 输入 |
+| 6 (Y3) | **→ ~counter[1]** | → U26.P2 (HC283 B2) |
+| 7 (GND) | → GND | |
+| 8 (Y4) | **→ ~counter[2]** | → U26.P15 (HC283 B3) |
+| 9 (A4) | ← counter[2] (U29.Q6) | 门4 输入 |
+| 10 (Y5) | **→ ~counter[3]** | → U26.P11 (HC283 B4) |
+| 11 (A5) | ← counter[3] (U29.Q9) | 门5 输入 |
+| 12 (Y6) | 悬空 | 门6 备用 |
+| 13 (A6) | → GND | 门6 防悬空 |
+| 14 (VCC) | → +5V | |
 
 > HC273 要 ~clk (上升沿锁存, 接 ~clk 在 clk 下降沿采样稳定值).
 > HC112 直连 clk (下降沿触发, 不需反相).
-> **283 要 ~counter (4位反码)** 做 duty-counter 减法: B=~counter, C0=1 → duty+(~counter+1)=duty-counter.
-> HC04 共 6 门: ~clk(1) + ~counter(4) = 5 门, 剩 1 门备用.
+> **283 要 ~counter (4位反码)** 做 duty-counter 减法: B=~counter, C0=1.
+> HC04 共 6 门: ~clk(1) + ~counter(4) = 5 门, 剩门6 备用.
 
 ---
 
