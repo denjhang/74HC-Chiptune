@@ -213,10 +213,17 @@ def main():
     print()
 
     stop = False
+    last_handle = 0.0
+    MIN_INTERVAL = 0.03   # 按键处理最小间隔 30ms (按住连发时节流, 避免 FT232H 缓冲溢出)
     try:
         while not stop:
             if msvcrt and msvcrt.kbhit():
                 ch = msvcrt.getch()
+                # 排空连发队列: 按住不放时 Windows 连发几十次, 只处理间隔够的
+                now = time.time()
+                if now - last_handle < MIN_INTERVAL:
+                    continue   # 丢弃连发, 等下一轮
+                last_handle = now
                 if ch == b'\xe0':
                     ch2 = msvcrt.getch()
                     if ch2 == b'H':       # ↑ 音量
@@ -244,7 +251,7 @@ def main():
                 elif ch in (b'q', b'Q', b'\x1b'):
                     stop = True
                 status(vol, period12, sel)
-            time.sleep(0.02)
+            time.sleep(0.01)
     except KeyboardInterrupt:
         print("\nCtrl+C 退出")
     finally:
