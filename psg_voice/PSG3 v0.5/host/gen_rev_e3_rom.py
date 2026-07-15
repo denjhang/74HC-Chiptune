@@ -47,8 +47,8 @@ PCM_SOURCES = [
 ]
 
 
-def load_wav_pcm(filepath, target_rate=TARGET_RATE, target_len=SLOT_SIZE):
-    """加载 WAV, 重采样到 target_rate, 转无符号 8-bit, crossfade 无缝循环, 截断/填充到 target_len."""
+def load_wav_pcm(filepath, target_rate=TARGET_RATE, target_len=SLOT_SIZE, gain=1.0):
+    """加载 WAV, 重采样到 target_rate, 归一化后 ×gain, 转 8-bit (clip), crossfade 循环."""
     w = wave.open(filepath)
     rate = w.getframerate()
     n_channels = w.getnchannels()
@@ -81,11 +81,11 @@ def load_wav_pcm(filepath, target_rate=TARGET_RATE, target_len=SLOT_SIZE):
         val = samples[idx0] * (1 - frac) + samples[idx1] * frac
         resampled.append(val)
 
-    # 归一化 → 8-bit 无符号 (128=静音)
+    # 归一化 → 8-bit 无符号 (128=静音), 再 ×gain (clip 到 0-255)
     max_abs = max(abs(v) for v in resampled) if resampled else 1
     if max_abs == 0:
         max_abs = 1
-    pcm = [clamp(128 + 127 * v / max_abs) for v in resampled]
+    pcm = [clamp(128 + 127 * gain * v / max_abs) for v in resampled]
 
     # crossfade 首尾 (无缝循环)
     if len(pcm) > 200:
@@ -105,7 +105,7 @@ def load_wav_pcm(filepath, target_rate=TARGET_RATE, target_len=SLOT_SIZE):
     return pcm
 
 
-def build_rom():
+def build_rom(gain=1.0):
     rom = bytearray(SLOT_SIZE * NUM_SLOTS)   # 128K
 
     for slot in range(NUM_SLOTS):
@@ -113,7 +113,7 @@ def build_rom():
         pcm_file, pcm_name = PCM_SOURCES[slot]
         pcm_path = os.path.join(PCM_DIR, pcm_file)
         if os.path.exists(pcm_path):
-            pcm = load_wav_pcm(pcm_path, TARGET_RATE, SLOT_SIZE)
+            pcm = load_wav_pcm(pcm_path, TARGET_RATE, SLOT_SIZE, gain=gain)
             for i in range(SLOT_SIZE):
                 rom[base + i] = pcm[i]
             print(f'槽 {slot:2d} (0x{slot:02X}) {pcm_name:20s}: {os.path.basename(pcm_file)}')
@@ -131,8 +131,13 @@ def write_bin(rom, filename):
 
 
 def main():
-    rom = build_rom()
+    # 用法: gen_rev_e3_rom.py [输出文件] [增益倍数]
+    #   默认: rev_e3_rom.bin 1.0x
+    #   例:   gen_rev_e3_rom.py rev_e3_rom_4x.bin 4
     out_file = sys.argv[1] if len(sys.argv) > 1 else 'rev_e3_rom.bin'
+    gain = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
+    print(f'增益: {gain}x')
+    rom = build_rom(gain=gain)
     write_bin(rom, out_file)
 
 
